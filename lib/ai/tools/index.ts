@@ -14,6 +14,7 @@ import { ToolContext, ToolResult, ToolRegistry } from './types';
 import * as crmTools from './crm';
 import * as workTools from './works';
 import * as systemTools from './system';
+import * as inventoryTools from './inventory';
 
 /**
  * Tool Declarations (for Gemini function calling)
@@ -69,6 +70,77 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
                 },
             },
             required: ['workId'],
+        },
+    },
+
+    // ========== INVENTORY ==========
+    {
+        name: 'list_inventory_items',
+        description: 'Lista itens de estoque (materiais) com busca e filtro de baixo estoque',
+        parameters: {
+            type: 'object',
+            properties: {
+                search: {
+                    type: 'string',
+                    description: 'Termo de busca (nome ou SKU)',
+                },
+                lowStock: {
+                    type: 'boolean',
+                    description: 'Se true, lista apenas itens com estoque abaixo do mínimo',
+                },
+                category: {
+                    type: 'string',
+                    description: 'Filtrar por categoria',
+                },
+                limit: {
+                    type: 'number',
+                    description: 'Máximo de resultados',
+                },
+            },
+        },
+    },
+    {
+        name: 'get_item_details',
+        description: 'Retorna detalhes completos de um item de estoque, incluindo financeiro',
+        parameters: {
+            type: 'object',
+            properties: {
+                itemId: {
+                    type: 'string',
+                    description: 'ID (UUID) do item',
+                },
+                sku: {
+                    type: 'string',
+                    description: 'SKU do item (alternativa ao ID)',
+                },
+            },
+        },
+    },
+    {
+        name: 'record_stock_movement',
+        description: 'Registra entrada ou saída de estoque. USE COM CAUTELA.',
+        parameters: {
+            type: 'object',
+            properties: {
+                itemId: {
+                    type: 'string',
+                    description: 'ID (UUID) do item para movimentar',
+                },
+                quantity: {
+                    type: 'number',
+                    description: 'Quantidade a movimentar (absoluta)',
+                },
+                type: {
+                    type: 'string',
+                    enum: ['in', 'out'],
+                    description: 'Tipo de movimento: in (entrada/compra) ou out (saída/consumo)',
+                },
+                reason: {
+                    type: 'string',
+                    description: 'Motivo do movimento (ex: "Compra NF 123", "Uso na Obra X")',
+                },
+            },
+            required: ['itemId', 'quantity', 'type', 'reason'],
         },
     },
 
@@ -201,6 +273,11 @@ export const TOOL_HANDLERS: ToolRegistry = {
     get_work_summary: workTools.getWorkSummary,
     list_works: workTools.listWorks,
     get_work_phase_status: workTools.getWorkPhaseStatus,
+
+    // Inventory
+    list_inventory_items: inventoryTools.listInventoryItems,
+    get_item_details: inventoryTools.getItemDetails,
+    record_stock_movement: inventoryTools.recordStockMovement,
 
     // CRM
     get_client_summary: crmTools.getClientSummary,
