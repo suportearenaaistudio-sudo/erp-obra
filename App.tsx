@@ -1,6 +1,7 @@
 import React from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
+import { SupabaseTest } from './components/SupabaseTest';
 import { Dashboard } from './pages/Dashboard';
 import { Projects } from './pages/Projects';
 import { Inventory } from './pages/Inventory';
@@ -13,6 +14,9 @@ import { Contractors } from './pages/Contractors';
 function App() {
   return (
     <Router>
+      {/* Teste de conexão Supabase - remova após confirmar que está funcionando */}
+      <SupabaseTest />
+
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<Dashboard />} />
