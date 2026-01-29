@@ -230,9 +230,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const isTenantAdmin = () => profile?.role?.is_tenant_admin || false;
 
     const isDevAdmin = () => {
-        // Check if user has saas_users entry
-        // This would need to be checked separately or via metadata
-        return user?.email === 'admin@obra360.com' || user?.email === 'suporte@obra360.com';
+        // Dev Admins - Super admins do SaaS Obra360
+        const devAdminEmails = [
+            'admin@obra360.com',
+            'suporte@obra360.com',
+            'vitorpradotamos@gmail.com',        // Vitor - Dev Admin Principal
+            'marcospaulotrindade3@gmail.com',   // Marcos - Dev Admin Principal
+        ];
+
+        return devAdminEmails.includes(user?.email || '');
     };
 
     // Auth methods
