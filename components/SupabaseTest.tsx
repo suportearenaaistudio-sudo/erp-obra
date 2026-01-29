@@ -1,74 +1,52 @@
-import { useEffect, useState } from 'react'
-import { checkSupabaseConnection } from '../lib/supabase'
+import React, { useEffect, useState } from 'react';
+import { supabase } from '../lib/supabase';
 
-export function SupabaseTest() {
-    const [status, setStatus] = useState<{
-        loading: boolean
-        connected: boolean
-        message: string
-    }>({
-        loading: true,
-        connected: false,
-        message: 'Testando conexão com Supabase...'
-    })
+export const SupabaseTest: React.FC = () => {
+    const [status, setStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
+    const [message, setMessage] = useState<string>('Conectando ao Supabase...');
 
     useEffect(() => {
-        async function testConnection() {
+        const testConnection = async () => {
             try {
-                const result = await checkSupabaseConnection()
-                setStatus({
-                    loading: false,
-                    connected: result.connected,
-                    message: result.message
-                })
-            } catch (error) {
-                setStatus({
-                    loading: false,
-                    connected: false,
-                    message: `❌ Erro ao testar: ${error instanceof Error ? error.message : 'Desconhecido'}`
-                })
-            }
-        }
+                // Testa a conexão fazendo uma query simples
+                const { data, error } = await supabase
+                    .from('profiles')
+                    .select('count')
+                    .limit(1);
 
-        testConnection()
-    }, [])
+                if (error) {
+                    setStatus('error');
+                    setMessage(`Erro ao conectar: ${error.message}`);
+                } else {
+                    setStatus('connected');
+                    setMessage('✅ Conectado ao Supabase com sucesso!');
+                }
+            } catch (err) {
+                setStatus('error');
+                setMessage(`Erro ao conectar: ${err instanceof Error ? err.message : 'Erro desconhecido'}`);
+            }
+        };
+
+        testConnection();
+    }, []);
 
     return (
         <div
             style={{
-                padding: '20px',
-                margin: '20px',
+                position: 'fixed',
+                top: '10px',
+                right: '10px',
+                padding: '10px 20px',
                 borderRadius: '8px',
-                background: status.loading
-                    ? '#f0f0f0'
-                    : status.connected
-                        ? '#d4edda'
-                        : '#f8d7da',
-                border: `2px solid ${status.loading
-                        ? '#ccc'
-                        : status.connected
-                            ? '#28a745'
-                            : '#dc3545'
-                    }`,
-                fontFamily: 'monospace',
-                fontSize: '14px'
+                backgroundColor: status === 'connected' ? '#10b981' : status === 'error' ? '#ef4444' : '#3b82f6',
+                color: 'white',
+                fontSize: '14px',
+                fontWeight: 500,
+                zIndex: 9999,
+                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
             }}
         >
-            <h3 style={{ margin: '0 0 10px 0' }}>
-                {status.loading ? '⏳' : status.connected ? '✅' : '❌'} Teste de Conexão Supabase
-            </h3>
-            <p style={{ margin: 0 }}>{status.message}</p>
-
-            {!status.loading && !status.connected && (
-                <div style={{ marginTop: '10px', fontSize: '12px', color: '#721c24' }}>
-                    <strong>Dicas:</strong>
-                    <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
-                        <li>Verifique se suas credenciais estão corretas no .env.local</li>
-                        <li>Certifique-se de que reiniciou o servidor após editar o .env.local</li>
-                        <li>Confirme se seu projeto Supabase está ativo</li>
-                    </ul>
-                </div>
-            )}
+            {message}
         </div>
-    )
-}
+    );
+};
