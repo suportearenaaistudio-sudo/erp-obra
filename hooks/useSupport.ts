@@ -275,6 +275,21 @@ export const useSupport = () => {
         };
     }, [profile?.id]);
 
+    // Send message to AI Support
+    const sendToAISupport = async (message: string, conversationId?: string) => {
+        if (!message) return;
+
+        const { data, error } = await supabase.functions.invoke('ai-support', {
+            body: {
+                conversationId,
+                message,
+            },
+        });
+
+        if (error) throw error;
+        return data;
+    };
+
     return {
         tickets,
         loading,
@@ -284,5 +299,6 @@ export const useSupport = () => {
         loadTicketMessages,
         sendMessage,
         markAsRead,
+        sendToAISupport,
     };
 };
