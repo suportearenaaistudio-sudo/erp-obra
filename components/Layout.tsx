@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { SupportChat } from './SupportChat';
+import { AIChat } from './AIChat';
 import {
   LayoutDashboard,
   Search,
@@ -292,6 +293,9 @@ export const Layout = () => {
 
       {/* Support Chat Widget */}
       <SupportChat />
+
+      {/* AI Assistant Widget */}
+      <AIChat />
     </div >
   );
 };
