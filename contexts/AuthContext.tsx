@@ -246,93 +246,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const signUp = async (email: string, password: string, name: string, companyName: string) => {
         try {
-            // 1. Create tenant
-            const { data: tenantData, error: tenantError } = await supabase
-                .from('tenants')
-                .insert({
-                    name: companyName,
-                    slug: companyName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-                    email: email,
-                    status: 'active',
-                })
-                .select()
-                .single();
-
-            if (tenantError) throw tenantError;
-
-            // 2. Get Starter plan
-            const { data: planData } = await supabase
-                .from('plans')
-                .select('*')
-                .eq('name', 'starter')
-                .single();
-
-            // 3. Create subscription (trial)
-            const trialEnd = new Date();
-            trialEnd.setDate(trialEnd.getDate() + 14);
-
-            await supabase.from('subscriptions').insert({
-                tenant_id: tenantData.id,
-                plan_id: planData?.id,
-                status: 'trial',
-                trial_start: new Date().toISOString().split('T')[0],
-                trial_end: trialEnd.toISOString().split('T')[0],
-                current_period_start: new Date().toISOString().split('T')[0],
-                current_period_end: trialEnd.toISOString().split('T')[0],
-                billing_cycle: 'monthly',
-                limits_snapshot: planData ? {
-                    max_users: planData.max_users,
-                    max_projects: planData.max_projects,
-                    max_storage_gb: planData.max_storage_gb,
-                } : {},
-            });
-
-            // 4. Create default roles
-            const roles = [
-                { name: 'Admin', is_tenant_admin: true, is_default: true },
-                { name: 'Financeiro', is_tenant_admin: false, is_default: false },
-                { name: 'Gestor de Obras', is_tenant_admin: false, is_default: false },
-                { name: 'Compras', is_tenant_admin: false, is_default: false },
-                { name: 'Vendas', is_tenant_admin: false, is_default: false },
-            ];
-
-            const { data: rolesData } = await supabase
-                .from('roles')
-                .insert(roles.map(r => ({ ...r, tenant_id: tenantData.id })))
-                .select();
-
-            // 5. Add permissions for Admin role
-            const adminRole = rolesData?.find(r => r.name === 'Admin');
-            if (adminRole) {
-                const adminPermissions = [
-                    'CLIENTS:READ', 'CLIENTS:WRITE',
-                    'PROJECTS:READ', 'PROJECTS:WRITE',
-                    'INVENTORY:READ', 'INVENTORY:WRITE',
-                    'PROCUREMENT:READ', 'PROCUREMENT:WRITE', 'PROCUREMENT:APPROVE',
-                    'FINANCE:READ', 'FINANCE:WRITE', 'FINANCE:APPROVE',
-                    'CONTRACTORS:READ', 'CONTRACTORS:WRITE',
-                    'REPORTS:READ', 'REPORTS:EXPORT',
-                    'USERS:READ', 'USERS:WRITE',
-                    'ROLES:READ', 'ROLES:WRITE',
-                ];
-
-                await supabase.from('role_permissions').insert(
-                    adminPermissions.map(permission => ({
-                        tenant_id: tenantData.id,
-                        role_id: adminRole.id,
-                        permission_key: permission,
-                    }))
-                );
-            }
-
-            // 6. Sign up user with tenant_id in metadata
-            const { error: signUpError } = await supabase.auth.signUp({
+            // Database trigger will handle tenant creation automatically
+            const { data, error: signUpError } = await supabase.auth.signUp({
                 email,
                 password,
                 options: {
                     data: {
                         name,
-                        tenant_id: tenantData.id,
+                        company_name: companyName,
                     },
                 },
             });
