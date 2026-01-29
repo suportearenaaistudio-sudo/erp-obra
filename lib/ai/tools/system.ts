@@ -50,7 +50,7 @@ export const getUserContext: ToolHandler = {
                 status: tenant?.status,
             },
             plan: {
-                name: subscription?.plans?.display_name || 'Free',
+                name: (subscription?.plans as any)?.display_name || 'Free',
                 status: subscription?.status || 'trial',
                 trialEnd: subscription?.trial_end,
             },

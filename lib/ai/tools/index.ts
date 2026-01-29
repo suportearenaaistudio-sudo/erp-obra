@@ -7,7 +7,7 @@
  * - RBAC enforcement
  */
 
-import { FunctionDeclaration } from '@google/generative-ai';
+import { FunctionDeclaration, SchemaType } from '@google/generative-ai';
 import { ToolContext, ToolResult, ToolRegistry } from './types';
 
 // Import all tool handlers
@@ -15,6 +15,8 @@ import * as crmTools from './crm';
 import * as workTools from './works';
 import * as systemTools from './system';
 import * as inventoryTools from './inventory';
+import * as financeTools from './finance';
+import * as reportTools from './reports';
 
 /**
  * Tool Declarations (for Gemini function calling)
@@ -26,10 +28,10 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         name: 'get_work_summary',
         description: 'Retorna resumo completo de uma obra específica, incluindo cliente, orçamento, timeline, fase atual e equipe',
         parameters: {
-            type: 'object',
+            type: SchemaType.OBJECT,
             properties: {
                 workId: {
-                    type: 'string',
+                    type: SchemaType.STRING,
                     description: 'ID (UUID) da obra',
                 },
             },
@@ -40,19 +42,20 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         name: 'list_works',
         description: 'Lista obras com filtros opcionais. Retorna informações resumidas de múltiplas obras.',
         parameters: {
-            type: 'object',
+            type: SchemaType.OBJECT,
             properties: {
                 status: {
-                    type: 'string',
+                    type: SchemaType.STRING,
+                    description: 'Filtrar por status da obra (opcional): active, paused, completed, cancelled',
                     enum: ['active', 'paused', 'completed', 'cancelled'],
-                    description: 'Filtrar por status da obra (opcional)',
+                    format: 'enum',
                 },
                 limit: {
-                    type: 'number',
+                    type: SchemaType.NUMBER,
                     description: 'Número máximo de resultados (default: 10, max: 50)',
                 },
                 clientId: {
-                    type: 'string',
+                    type: SchemaType.STRING,
                     description: 'Filtrar por ID do cliente (opcional)',
                 },
             },
@@ -62,10 +65,10 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         name: 'get_work_phase_status',
         description: 'Retorna status detalhado das fases/etapas de uma obra específica',
         parameters: {
-            type: 'object',
+            type: SchemaType.OBJECT,
             properties: {
                 workId: {
-                    type: 'string',
+                    type: SchemaType.STRING,
                     description: 'ID (UUID) da obra',
                 },
             },
@@ -78,22 +81,22 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         name: 'list_inventory_items',
         description: 'Lista itens de estoque (materiais) com busca e filtro de baixo estoque',
         parameters: {
-            type: 'object',
+            type: SchemaType.OBJECT,
             properties: {
                 search: {
-                    type: 'string',
+                    type: SchemaType.STRING,
                     description: 'Termo de busca (nome ou SKU)',
                 },
                 lowStock: {
-                    type: 'boolean',
+                    type: SchemaType.BOOLEAN,
                     description: 'Se true, lista apenas itens com estoque abaixo do mínimo',
                 },
                 category: {
-                    type: 'string',
+                    type: SchemaType.STRING,
                     description: 'Filtrar por categoria',
                 },
                 limit: {
-                    type: 'number',
+                    type: SchemaType.NUMBER,
                     description: 'Máximo de resultados',
                 },
             },
@@ -103,14 +106,14 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         name: 'get_item_details',
         description: 'Retorna detalhes completos de um item de estoque, incluindo financeiro',
         parameters: {
-            type: 'object',
+            type: SchemaType.OBJECT,
             properties: {
                 itemId: {
-                    type: 'string',
+                    type: SchemaType.STRING,
                     description: 'ID (UUID) do item',
                 },
                 sku: {
-                    type: 'string',
+                    type: SchemaType.STRING,
                     description: 'SKU do item (alternativa ao ID)',
                 },
             },
@@ -120,27 +123,104 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         name: 'record_stock_movement',
         description: 'Registra entrada ou saída de estoque. USE COM CAUTELA.',
         parameters: {
-            type: 'object',
+            type: SchemaType.OBJECT,
             properties: {
                 itemId: {
-                    type: 'string',
+                    type: SchemaType.STRING,
                     description: 'ID (UUID) do item para movimentar',
                 },
                 quantity: {
-                    type: 'number',
+                    type: SchemaType.NUMBER,
                     description: 'Quantidade a movimentar (absoluta)',
                 },
                 type: {
-                    type: 'string',
-                    enum: ['in', 'out'],
+                    type: SchemaType.STRING,
                     description: 'Tipo de movimento: in (entrada/compra) ou out (saída/consumo)',
+                    enum: ['in', 'out'],
+                    format: 'enum',
                 },
                 reason: {
-                    type: 'string',
+                    type: SchemaType.STRING,
                     description: 'Motivo do movimento (ex: "Compra NF 123", "Uso na Obra X")',
                 },
             },
             required: ['itemId', 'quantity', 'type', 'reason'],
+        },
+    },
+
+    // ========== FINANCE ==========
+    {
+        name: 'get_financial_summary',
+        description: 'Retorna resumo financeiro do mês (entradas, saídas, saldo, inadimplência)',
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                month: {
+                    type: SchemaType.NUMBER,
+                    description: 'Mês (1-12). Se omitido, usa mês atual',
+                },
+                year: {
+                    type: SchemaType.NUMBER,
+                    description: 'Ano (ex: 2024). Se omitido, usa ano atual',
+                },
+            },
+        },
+    },
+    {
+        name: 'list_transactions',
+        description: 'Lista transações financeiras (contas a pagar/receber) com filtros',
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                type: {
+                    type: SchemaType.STRING,
+                    description: 'AP = Contas a Pagar, AR = Contas a Receber',
+                    enum: ['AP', 'AR'],
+                    format: 'enum',
+                },
+                status: {
+                    type: SchemaType.STRING,
+                    description: 'Status da transação',
+                    enum: ['PENDING', 'PAID', 'OVERDUE'],
+                    format: 'enum',
+                },
+                limit: {
+                    type: SchemaType.NUMBER,
+                    description: 'Limite de resultados',
+                },
+                startDate: {
+                    type: SchemaType.STRING,
+                    description: 'Data inicial (YYYY-MM-DD)',
+                },
+                endDate: {
+                    type: SchemaType.STRING,
+                    description: 'Data final (YYYY-MM-DD)',
+                },
+            },
+        },
+    },
+
+    // ========== REPORTS ==========
+    {
+        name: 'generate_report_summary',
+        description: 'Gera um resumo consolidado de dados (financeiro, obras, estoque) para relatórios',
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                type: {
+                    type: SchemaType.STRING,
+                    description: 'Tipo de relatório desejado',
+                    enum: ['financial', 'works', 'inventory', 'executive'],
+                    format: 'enum',
+                },
+                period: {
+                    type: SchemaType.STRING,
+                    description: 'Período do relatório (opcional, default: current_month)',
+                    enum: ['current_month', 'last_month', 'year_to_date'],
+                    format: 'enum',
+                },
+            },
+            required: ['type'],
         },
     },
 
@@ -149,10 +229,10 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         name: 'get_client_summary',
         description: 'Retorna informações detalhadas de um cliente específico, incluindo histórico de projetos',
         parameters: {
-            type: 'object',
+            type: SchemaType.OBJECT,
             properties: {
                 clientId: {
-                    type: 'string',
+                    type: SchemaType.STRING,
                     description: 'ID (UUID) do cliente',
                 },
             },
@@ -163,14 +243,14 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         name: 'search_clients',
         description: 'Busca clientes por nome, email, documento (CPF/CNPJ) ou empresa',
         parameters: {
-            type: 'object',
+            type: SchemaType.OBJECT,
             properties: {
                 query: {
-                    type: 'string',
+                    type: SchemaType.STRING,
                     description: 'Termo de busca (nome, email, documento, etc.)',
                 },
                 limit: {
-                    type: 'number',
+                    type: SchemaType.NUMBER,
                     description: 'Número máximo de resultados (default: 10)',
                 },
             },
@@ -181,11 +261,12 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         name: 'get_pipeline_status',
         description: 'Retorna status do pipeline de vendas/CRM (total de clientes, projetos ativos, etc.)',
         parameters: {
-            type: 'object',
+            type: SchemaType.OBJECT,
             properties: {
                 filters: {
-                    type: 'object',
+                    type: SchemaType.OBJECT,
                     description: 'Filtros opcionais (a definir)',
+                    properties: {},
                 },
             },
         },
@@ -196,7 +277,7 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         name: 'get_user_context',
         description: 'Retorna informações do usuário logado, empresa e plano atual',
         parameters: {
-            type: 'object',
+            type: SchemaType.OBJECT,
             properties: {},
         },
     },
@@ -204,10 +285,10 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         name: 'get_recent_errors',
         description: 'Retorna erros recentes do sistema para o usuário atual (útil para debug)',
         parameters: {
-            type: 'object',
+            type: SchemaType.OBJECT,
             properties: {
                 lastHours: {
-                    type: 'number',
+                    type: SchemaType.NUMBER,
                     description: 'Últimas N horas (default: 24)',
                 },
             },
@@ -217,28 +298,30 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         name: 'create_support_ticket',
         description: 'Cria um ticket de suporte. Use quando não conseguir resolver o problema do usuário.',
         parameters: {
-            type: 'object',
+            type: SchemaType.OBJECT,
             properties: {
                 category: {
-                    type: 'string',
-                    enum: ['question', 'bug', 'feature', 'urgent'],
+                    type: SchemaType.STRING,
                     description: 'Categoria do ticket',
+                    enum: ['question', 'bug', 'feature', 'urgent'],
+                    format: 'enum',
                 },
                 severity: {
-                    type: 'string',
-                    enum: ['low', 'normal', 'high', 'urgent'],
+                    type: SchemaType.STRING,
                     description: 'Severidade do problema',
+                    enum: ['low', 'normal', 'high', 'urgent'],
+                    format: 'enum',
                 },
                 summary: {
-                    type: 'string',
+                    type: SchemaType.STRING,
                     description: 'Resumo do problema (máximo 255 caracteres)',
                 },
                 steps: {
-                    type: 'string',
+                    type: SchemaType.STRING,
                     description: 'Passos para reproduzir o problema (opcional)',
                 },
                 transcriptRef: {
-                    type: 'string',
+                    type: SchemaType.STRING,
                     description: 'Referência à transcrição da conversa (opcional)',
                 },
             },
@@ -249,14 +332,14 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         name: 'handoff_to_human',
         description: 'Transfere uma conversa/ticket para atendimento humano',
         parameters: {
-            type: 'object',
+            type: SchemaType.OBJECT,
             properties: {
                 ticketId: {
-                    type: 'string',
+                    type: SchemaType.STRING,
                     description: 'ID do ticket a transferir',
                 },
                 reason: {
-                    type: 'string',
+                    type: SchemaType.STRING,
                     description: 'Motivo da transferência',
                 },
             },
@@ -278,6 +361,13 @@ export const TOOL_HANDLERS: ToolRegistry = {
     list_inventory_items: inventoryTools.listInventoryItems,
     get_item_details: inventoryTools.getItemDetails,
     record_stock_movement: inventoryTools.recordStockMovement,
+
+    // Finance
+    get_financial_summary: financeTools.getFinancialSummary,
+    list_transactions: financeTools.listTransactions,
+
+    // Reports
+    generate_report_summary: reportTools.generateReportSummary,
 
     // CRM
     get_client_summary: crmTools.getClientSummary,

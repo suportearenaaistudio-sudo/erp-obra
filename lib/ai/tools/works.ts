@@ -50,9 +50,9 @@ export const getWorkSummary: ToolHandler = {
             name: data.name,
             status: data.status,
             client: {
-                name: data.clients?.name || 'N/A',
-                email: data.clients?.email,
-                phone: data.clients?.phone,
+                name: (data.clients as any)?.name || 'N/A',
+                email: (data.clients as any)?.email,
+                phone: (data.clients as any)?.phone,
             },
             timeline: {
                 start: data.start_date,
@@ -130,7 +130,7 @@ export const listWorks: ToolHandler = {
                 id: w.id,
                 name: w.name,
                 status: w.status,
-                client: w.clients?.name || 'N/A',
+                client: (w.clients as any)?.name || 'N/A',
                 budget: {
                     total: w.budget_total || 0,
                     spent: w.budget_spent || 0,

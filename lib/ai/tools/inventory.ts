@@ -36,9 +36,7 @@ export const listInventoryItems: ToolHandler = {
         avg_cost,
         reserved
       `)
-            .eq('tenant_id', context.tenantId)
-            .order('name', { ascending: true })
-            .limit(args.limit || 20);
+            .eq('tenant_id', context.tenantId);
 
         if (args.search) {
             query = query.or(`name.ilike.%${args.search}%,sku.ilike.%${args.search}%`);
@@ -54,10 +52,12 @@ export const listInventoryItems: ToolHandler = {
         // current_stock <= min_stock
         // Nota: Supabase postgrest filter 'lte' compara com valor fixo, não coluna.
         // Para comparar colunas, precisaria de RPC ou raw filter, mas raw filter expõe SQL.
-        // Vamos buscar e filtrar na memória se lowStock=true, ou usar uma view se existisse.
-        // Por simplificação, vamos buscar todos e filtrar se lowStock for true, mas limitando a busca.
+        // Vamos buscar e filtrar na memória se lowStock=true, mas limitando a busca se não tiver filtro.
 
-        const { data, error } = await query;
+        // Aplica ordenação e limite APÓS os filtros
+        const { data, error } = await query
+            .order('name', { ascending: true })
+            .limit(args.limit || 20);
 
         if (error) {
             throw new Error(`Erro ao buscar estoque: ${error.message}`);
@@ -107,8 +107,7 @@ export const getItemDetails: ToolHandler = {
         let query = supabase
             .from('materials')
             .select('*')
-            .eq('tenant_id', context.tenantId)
-            .single();
+            .eq('tenant_id', context.tenantId);
 
         if (args.itemId) {
             query = query.eq('id', args.itemId);
@@ -116,7 +115,7 @@ export const getItemDetails: ToolHandler = {
             query = query.eq('sku', args.sku);
         }
 
-        const { data: item, error } = await query;
+        const { data: item, error } = await query.single();
 
         if (error || !item) {
             throw new Error(`Item não encontrado (${args.itemId || args.sku})`);
