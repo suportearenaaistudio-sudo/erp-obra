@@ -104,7 +104,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     const loadUserData = async (userId: string) => {
-        console.log('🔐 Loading user data for:', userId);
         try {
             // 1. Load profile
             const { data: profileData, error: profileError } = await supabase
@@ -123,8 +122,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 .eq('auth_user_id', userId)
                 .single();
 
-            console.log('👤 Profile query result:', { profileData, profileError });
-
             if (profileError) {
                 console.error('❌ Profile error:', profileError);
                 throw profileError;
@@ -136,7 +133,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
 
             setProfile(profileData as any);
-            console.log('✅ Profile loaded:', profileData);
 
             // 2. Load tenant
             const { data: tenantData, error: tenantError } = await supabase
@@ -145,14 +141,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 .eq('id', profileData.tenant_id)
                 .single();
 
-            console.log('🏢 Tenant query result:', { tenantData, tenantError });
-
-            if (tenantError) {
-                console.error('❌ Tenant error:', tenantError);
-                throw tenantError;
-            }
             setTenant(tenantData);
-            console.log('✅ Tenant loaded:', tenantData);
 
             // 3. Load subscription with plan
             const { data: subData, error: subError } = await supabase
@@ -168,14 +157,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 .eq('tenant_id', profileData.tenant_id)
                 .single();
 
-            console.log('💳 Subscription query result:', { subData, subError });
-
             if (subError) {
                 console.error('⚠️ Subscription error (may be optional):', subError);
                 // Subscription pode não existir ainda, não é fatal
             } else {
                 setSubscription(subData as any);
-                console.log('✅ Subscription loaded');
             }
 
             // 4. Resolve features (plan + overrides)
@@ -186,7 +172,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 await loadPermissions(profileData.tenant_id, profileData.role_id);
             }
 
-            console.log('✅ All user data loaded successfully');
+            if (profileData.role_id) {
+                await loadPermissions(profileData.tenant_id, profileData.role_id);
+            }
 
         } catch (error) {
             console.error('❌ Error loading user data:', error);

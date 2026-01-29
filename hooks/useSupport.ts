@@ -40,7 +40,6 @@ export const useSupport = () => {
         message: string,
         category: SupportTicket['category'] = 'question'
     ) => {
-        console.log('🎫 Creating ticket...', { subject, category, profile, tenant });
 
         if (!profile?.id || !tenant?.id) {
             console.error('❌ Missing profile or tenant:', { profile, tenant });
@@ -68,8 +67,6 @@ export const useSupport = () => {
                 throw ticketError;
             }
 
-            console.log('✅ Ticket created:', ticket);
-
             // 2. Criar primeira mensagem
             const { error: messageError } = await supabase
                 .from('support_messages')
@@ -84,8 +81,6 @@ export const useSupport = () => {
                 console.error('❌ Message creation error:', messageError);
                 throw messageError;
             }
-
-            console.log('✅ Message created');
 
             // Recarregar tickets
             await loadMyTickets();
