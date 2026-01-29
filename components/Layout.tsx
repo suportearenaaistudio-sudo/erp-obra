@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { SupportChat } from './SupportChat';
 import {
   LayoutDashboard,
   Search,
@@ -288,6 +289,9 @@ export const Layout = () => {
       <main className="max-w-7xl mx-auto px-4 md:px-6 pt-32 pb-10 transition-all duration-300">
         <Outlet />
       </main>
+
+      {/* Support Chat Widget */}
+      <SupportChat />
     </div >
   );
 };

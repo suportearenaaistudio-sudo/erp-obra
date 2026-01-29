@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { DevAdminSupport } from './DevAdmin/DevAdminSupport';
+import { DevAdminStats } from './DevAdmin/DevAdminStats';
 import {
     Building2,
     Users,
@@ -15,6 +17,8 @@ import {
     XCircle,
     Clock,
     AlertTriangle,
+    MessageCircle,
+    BarChart3,
 } from 'lucide-react';
 
 interface TenantWithSubscription {
@@ -37,7 +41,7 @@ interface TenantWithSubscription {
 
 export const DevAdmin = () => {
     const { isDevAdmin } = useAuth();
-    const [activeTab, setActiveTab] = useState<'tenants' | 'plans' | 'features'>('tenants');
+    const [activeTab, setActiveTab] = useState<'stats' | 'tenants' | 'plans' | 'features' | 'support'>('stats');
     const [tenants, setTenants] = useState<TenantWithSubscription[]>([]);
     const [plans, setPlans] = useState<any[]>([]);
     const [features, setFeatures] = useState<any[]>([]);
@@ -187,9 +191,11 @@ export const DevAdmin = () => {
                 borderBottom: '2px solid #e5e7eb',
             }}>
                 {[
+                    { key: 'stats', label: 'Estatísticas', icon: BarChart3 },
                     { key: 'tenants', label: 'Tenants', icon: Building2 },
                     { key: 'plans', label: 'Planos', icon: CreditCard },
                     { key: 'features', label: 'Features', icon: ToggleLeft },
+                    { key: 'support', label: 'Suporte', icon: MessageCircle },
                 ].map(tab => {
                     const Icon = tab.icon;
                     return (
@@ -218,6 +224,10 @@ export const DevAdmin = () => {
             </div>
 
             {/* Content */}
+            {activeTab === 'stats' && (
+                <DevAdminStats />
+            )}
+
             {activeTab === 'tenants' && (
                 <div>
                     {/* Search */}
@@ -488,6 +498,10 @@ export const DevAdmin = () => {
                         </table>
                     </div>
                 </div>
+            )}
+
+            {activeTab === 'support' && (
+                <DevAdminSupport />
             )}
         </div>
     );
