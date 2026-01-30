@@ -99,9 +99,9 @@ export class FeatureGuard {
             .eq('tenant_id', tenantId)
             .single();
 
-        let features = new Set<string>(
-            subscription?.plan?.included_features || []
-        );
+        // Plan is embedded as object when using .single()
+        const planFeatures = (subscription?.plan as any)?.included_features || [];
+        let features = new Set<string>(planFeatures);
 
         // Get overrides
         const { data: overrides } = await this.client
@@ -174,7 +174,9 @@ export class RBACGuard {
         }
 
         // Tenant admins have all permissions
-        if (user.role?.is_tenant_admin) {
+        // Role is embedded as object when using .single()
+        const isTenantAdmin = (user.role as any)?.is_tenant_admin;
+        if (isTenantAdmin) {
             return new Set(['*']); // Wildcard for all permissions
         }
 

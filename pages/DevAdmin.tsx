@@ -71,7 +71,7 @@ export const DevAdmin = () => {
     };
 
     const loadTenants = async () => {
-        console.log('🔍 Carregando tenants...');
+
 
         const { data: tenantsData, error } = await supabase
             .from('tenants')
@@ -85,7 +85,7 @@ export const DevAdmin = () => {
       `)
             .order('created_at', { ascending: false });
 
-        console.log('📊 Resultado da query:', { tenantsData, error });
+
 
         if (error) {
             console.error('❌ Erro ao carregar tenants:', error);
@@ -99,7 +99,7 @@ export const DevAdmin = () => {
             return;
         }
 
-        console.log(`✅ ${tenantsData.length} tenants encontrados`);
+
 
         // Load counts separately
         const tenantsWithCounts = await Promise.all(
@@ -123,7 +123,7 @@ export const DevAdmin = () => {
             })
         );
 
-        console.log('✅ Tenants com contagens:', tenantsWithCounts);
+
         setTenants(tenantsWithCounts);
     };
 
