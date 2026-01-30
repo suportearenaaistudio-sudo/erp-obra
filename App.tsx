@@ -5,10 +5,14 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { FeatureProtectedRoute } from './components/FeatureProtectedRoute';
 import { FeatureKeys } from './lib/constants/features';
 import { Layout } from './components/Layout';
+import { PermissionProtectedRoute } from './components/PermissionProtectedRoute';
 
 // Auth pages
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
+
+// Public pages
+const JoinTeam = React.lazy(() => import('./pages/JoinTeam'));
 
 // App pages
 import { Dashboard } from './pages/Dashboard';
@@ -20,13 +24,13 @@ import { CRM } from './pages/CRM';
 import { Procurement } from './pages/Procurement';
 import { Contractors } from './pages/Contractors';
 
-// Sentry
-import * as Sentry from '@sentry/react';
-import { initMonitoring } from './lib/monitoring';
+// Sentry (disabled for now - install @sentry/react to enable)
+// import * as Sentry from '@sentry/react';
+// import { initMonitoring } from './lib/monitoring';
 import { Loader2 } from 'lucide-react';
 
 // Initialize Sentry
-initMonitoring();
+// initMonitoring();
 
 // Admin pages (Lazy Loaded)
 const DevAdmin = React.lazy(() => import('./pages/DevAdmin').then(module => ({ default: module.DevAdmin })));
@@ -49,7 +53,7 @@ const PageLoader = () => (
 
 function App() {
   return (
-    <Sentry.ErrorBoundary fallback={<div className="p-4 text-red-500">Something went wrong. Please refresh.</div>}>
+    <React.Fragment>
       <AuthProvider>
         <Router>
           <React.Suspense fallback={<PageLoader />}>
@@ -57,6 +61,7 @@ function App() {
               {/* Public routes */}
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
+              <Route path="/join" element={<JoinTeam />} />
 
               {/* Protected routes */}
               <Route element={<ProtectedRoute />}>
@@ -106,7 +111,10 @@ function App() {
 
                   {/* Admin routes */}
                   <Route path="dev-admin" element={<DevAdmin />} />
-                  <Route path="admin" element={<TenantAdmin />} />
+
+                  <Route element={<PermissionProtectedRoute permission="TENANT_SETTINGS:WRITE" />}>
+                    <Route path="admin" element={<TenantAdmin />} />
+                  </Route>
 
                   {/* Test route */}
                   <Route path="test-multitenant" element={<TestMultiTenantPage />} />
@@ -118,7 +126,7 @@ function App() {
           </React.Suspense>
         </Router>
       </AuthProvider>
-    </Sentry.ErrorBoundary>
+    </React.Fragment>
   );
 }
 export default App;

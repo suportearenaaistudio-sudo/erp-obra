@@ -1,18 +1,20 @@
 import React from 'react';
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  Legend, 
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
   ResponsiveContainer,
   PieChart,
   Pie,
   Cell
 } from 'recharts';
 import { mockProjects, mockFinancials } from '../mockData';
+import { WelcomeModal } from '../components/WelcomeModal';
+import { TrialBanner } from '../components/TrialBanner';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
 
@@ -50,29 +52,32 @@ export const Dashboard = () => {
 
   return (
     <div className="space-y-6">
+      <WelcomeModal />
+      <TrialBanner />
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <KpiCard 
-          title="Obras Ativas" 
-          value={activeProjects.toString()} 
-          subtext="2 em planejamento" 
+        <KpiCard
+          title="Obras Ativas"
+          value={activeProjects.toString()}
+          subtext="2 em planejamento"
           color="text-blue-600"
         />
-        <KpiCard 
-          title="Contas a Pagar (Pend.)" 
-          value={`R$ ${pendingAP.toLocaleString()}`} 
-          subtext="Vencimento próximos 7 dias" 
+        <KpiCard
+          title="Contas a Pagar (Pend.)"
+          value={`R$ ${pendingAP.toLocaleString()}`}
+          subtext="Vencimento próximos 7 dias"
           color="text-red-500"
         />
-        <KpiCard 
-          title="Execução Financeira" 
-          value={`${((totalSpent / totalBudget) * 100).toFixed(1)}%`} 
-          subtext="Média global de avanço" 
+        <KpiCard
+          title="Execução Financeira"
+          value={`${((totalSpent / totalBudget) * 100).toFixed(1)}%`}
+          subtext="Média global de avanço"
           color="text-emerald-500"
         />
-        <KpiCard 
-          title="Rupturas Previstas" 
-          value="3" 
-          subtext="Materiais críticos para próxima fase" 
+        <KpiCard
+          title="Rupturas Previstas"
+          value="3"
+          subtext="Materiais críticos para próxima fase"
           color="text-orange-500"
         />
       </div>
@@ -86,7 +91,7 @@ export const Dashboard = () => {
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="name" />
                 <YAxis />
-                <Tooltip 
+                <Tooltip
                   contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                 />
                 <Legend />
