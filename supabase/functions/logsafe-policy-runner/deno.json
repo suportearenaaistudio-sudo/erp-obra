@@ -1,0 +1,9 @@
+{
+    "name": "logsafe-policy-runner",
+    "version": "1.0.0",
+    "description": "LogSafe Policy Runner - Avalia políticas de segurança e cria incidentes",
+    "main": "index.ts",
+    "imports": {
+        "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.3"
+    }
+}

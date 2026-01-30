@@ -21,8 +21,11 @@ import {
   ChevronRight,
   UserCog,
   Shield,
-  Crown
+  Crown,
+  RefreshCw
 } from 'lucide-react';
+import { FeatureKeys } from '../lib/constants/features';
+import { IfFeature } from './FeatureGate';
 
 // Componente de Item da Sidebar
 const SidebarItem = ({ to, icon: Icon, label, onClick }: { to: string; icon: any; label: string; onClick: () => void }) => (
@@ -68,7 +71,7 @@ export const Layout = () => {
   const location = useLocation();
 
   // Get auth context
-  const { profile, tenant, signOut, isTenantAdmin, isDevAdmin } = useAuth();
+  const { profile, tenant, signOut, isTenantAdmin, isDevAdmin, refetchFeatures, featuresLoading } = useAuth();
 
   // Fecha sidebar ao mudar de rota
   useEffect(() => {
@@ -122,29 +125,52 @@ export const Layout = () => {
           {/* Sidebar Menu */}
           <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
 
+            {/* Principal */}
             <div className="space-y-1">
               <p className="px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Principal</p>
               <SidebarItem to="/" icon={LayoutDashboard} label="Dashboard Geral" onClick={() => { }} />
-              <SidebarItem to="/projects" icon={HardHat} label="Gestão de Obras" onClick={() => { }} />
-              <SidebarItem to="/crm" icon={Users} label="CRM & Vendas" onClick={() => { }} />
+
+              <IfFeature feature={FeatureKeys.PROJECTS}>
+                <SidebarItem to="/projects" icon={HardHat} label="Gestão de Obras" onClick={() => { }} />
+              </IfFeature>
+
+              <IfFeature feature={FeatureKeys.CRM}>
+                <SidebarItem to="/crm" icon={Users} label="CRM & Vendas" onClick={() => { }} />
+              </IfFeature>
             </div>
 
+            {/* Operacional */}
             <div className="space-y-1">
               <p className="px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Operacional</p>
-              <SidebarItem to="/contractors" icon={UserCog} label="Empreiteiros & Contratos" onClick={() => { }} />
-              <SidebarItem to="/inventory" icon={Package} label="Estoque Global" onClick={() => { }} />
-              <SidebarItem to="/procurement" icon={ShoppingCart} label="Suprimentos" onClick={() => { }} />
+
+              <IfFeature feature={FeatureKeys.CONTRACTORS}>
+                <SidebarItem to="/contractors" icon={UserCog} label="Empreiteiros & Contratos" onClick={() => { }} />
+              </IfFeature>
+
+              <IfFeature feature={FeatureKeys.INVENTORY}>
+                <SidebarItem to="/inventory" icon={Package} label="Estoque Global" onClick={() => { }} />
+              </IfFeature>
+
+              <IfFeature feature={FeatureKeys.PROCUREMENT}>
+                <SidebarItem to="/procurement" icon={ShoppingCart} label="Suprimentos" onClick={() => { }} />
+              </IfFeature>
             </div>
 
-            <div className="space-y-1">
-              <p className="px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Financeiro</p>
-              <SidebarItem to="/finance" icon={DollarSign} label="Financeiro" onClick={() => { }} />
-            </div>
+            {/* Financeiro */}
+            <IfFeature feature={FeatureKeys.FINANCE}>
+              <div className="space-y-1">
+                <p className="px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Financeiro</p>
+                <SidebarItem to="/finance" icon={DollarSign} label="Financeiro" onClick={() => { }} />
+              </div>
+            </IfFeature>
 
-            <div className="space-y-1">
-              <p className="px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Inteligência</p>
-              <SidebarItem to="/ai-assistant" icon={Sparkles} label="Assistente IA" onClick={() => { }} />
-            </div>
+            {/* Inteligência */}
+            <IfFeature feature={FeatureKeys.AI_CHAT}>
+              <div className="space-y-1">
+                <p className="px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Inteligência</p>
+                <SidebarItem to="/ai-assistant" icon={Sparkles} label="Assistente IA" onClick={() => { }} />
+              </div>
+            </IfFeature>
 
             {/* Admin Section - Conditional */}
             {(isTenantAdmin() || isDevAdmin()) && (
@@ -270,6 +296,18 @@ export const Layout = () => {
                       <p className="font-semibold text-sm text-slate-800">{profile?.name}</p>
                       <p className="text-xs text-slate-500">{profile?.email}</p>
                       <p className="text-[10px] text-slate-400 mt-1">{tenant?.name}</p>
+                    </div>
+                    <div className="p-2 border-b border-gray-100">
+                      <button
+                        onClick={async () => {
+                          await refetchFeatures();
+                        }}
+                        disabled={featuresLoading}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded-lg transition-colors mb-1"
+                      >
+                        <RefreshCw size={16} className={featuresLoading ? 'animate-spin' : ''} />
+                        {featuresLoading ? 'Atualizando...' : 'Atualizar Permissões'}
+                      </button>
                     </div>
                     <div className="p-2">
                       <button

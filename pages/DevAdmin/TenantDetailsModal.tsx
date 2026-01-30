@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { FeatureResolverService } from '../../lib/feature-resolver';
 import {
     X,
     Building2,
@@ -114,6 +115,9 @@ export const TenantDetailsModal: React.FC<TenantDetailsModalProps> = ({ tenantId
                     });
             }
 
+            // Invalidate cache
+            FeatureResolverService.invalidate(tenantId);
+
             // Reload data
             await loadTenantDetails();
             onUpdate();
@@ -136,6 +140,9 @@ export const TenantDetailsModal: React.FC<TenantDetailsModalProps> = ({ tenantId
                 .from('subscriptions')
                 .update({ status: newStatus })
                 .eq('id', subscription.id);
+
+            // Invalidate cache
+            FeatureResolverService.invalidate(tenantId);
 
             // Reload data
             await loadTenantDetails();

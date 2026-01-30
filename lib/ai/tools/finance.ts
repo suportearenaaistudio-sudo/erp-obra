@@ -6,6 +6,9 @@
 
 import { supabase } from '@/lib/supabase';
 import { ToolContext, ToolHandler } from './types';
+import { TenantSafeQuery } from '@/lib/tenant-safe-query';
+import { FeatureGuard } from '@/lib/security-guards';
+import { FeatureKeys } from '@/lib/constants/features';
 
 /**
  * get_financial_summary
@@ -13,8 +16,13 @@ import { ToolContext, ToolHandler } from './types';
  */
 export const getFinancialSummary: ToolHandler = {
     requiredPermission: 'view_finance',
+    requiredFeature: FeatureKeys.FINANCE,
 
     async execute(args: { month?: number; year?: number }, context: ToolContext) {
+        // Validate Feature Access
+        const featureGuard = new FeatureGuard(supabase);
+        await featureGuard.check(context.tenantId, FeatureKeys.FINANCE);
+
         // Se não informado, pega mês atual
         const now = new Date();
         const month = args.month || now.getMonth() + 1;
@@ -24,13 +32,17 @@ export const getFinancialSummary: ToolHandler = {
         const startDate = new Date(year, month - 1, 1).toISOString();
         const endDate = new Date(year, month, 0).toISOString(); // Último dia do mês
 
+        const safeQuery = new TenantSafeQuery(supabase, context.tenantId);
+
         // Buscar todas transações do período
-        const { data: records, error } = await supabase
+        // Note: TenantSafeQuery auto-injects tenant_id filter.
+        const { data: records, error } = await safeQuery
             .from('financial_records')
             .select('*')
-            .eq('tenant_id', context.tenantId)
             .gte('due_date', startDate)
-            .lte('due_date', endDate);
+            .lte('due_date', endDate)
+            // .eq('tenant_id', context.tenantId) // Automatically handled
+            ;
 
         if (error) {
             throw new Error(`Erro ao buscar dados financeiros: ${error.message}`);
@@ -96,6 +108,7 @@ export const getFinancialSummary: ToolHandler = {
  */
 export const listTransactions: ToolHandler = {
     requiredPermission: 'view_finance',
+    requiredFeature: FeatureKeys.FINANCE,
 
     async execute(
         args: {
@@ -107,7 +120,12 @@ export const listTransactions: ToolHandler = {
         },
         context: ToolContext
     ) {
-        let query = supabase
+        // Validate Feature Access
+        const featureGuard = new FeatureGuard(supabase);
+        await featureGuard.check(context.tenantId, FeatureKeys.FINANCE);
+
+        const safeQuery = new TenantSafeQuery(supabase, context.tenantId);
+        let query = safeQuery
             .from('financial_records')
             .select(`
         id,
@@ -120,9 +138,12 @@ export const listTransactions: ToolHandler = {
         project_id,
         projects (name)
       `)
-            .eq('tenant_id', context.tenantId)
-            .order('due_date', { ascending: true })
-            .limit(args.limit || 20);
+            // .eq('tenant_id', context.tenantId) // Handled by safeQuery
+            ;
+
+        // Apply filters to the query builder returned by safeQuery.select()
+        // Wait, safeQuery.from().select() returns a builder.
+        // We can chain methods on it.
 
         if (args.type) {
             query = query.eq('type', args.type);
@@ -140,7 +161,9 @@ export const listTransactions: ToolHandler = {
             query = query.lte('due_date', args.endDate);
         }
 
-        const { data, error } = await query;
+        const { data, error } = await query
+            .order('due_date', { ascending: true })
+            .limit(args.limit || 20);
 
         if (error) {
             throw new Error(`Erro ao listar transações: ${error.message}`);

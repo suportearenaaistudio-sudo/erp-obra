@@ -85,50 +85,26 @@ export class SubscriptionGuard {
  * Feature Guard
  * Blocks access if feature is not enabled for the tenant
  */
+// FeatureGuard updated to use FeatureResolverService
+import { FeatureResolverService } from './feature-resolver';
+
+/**
+ * Feature Guard
+ * Blocks access if feature is not enabled for the tenant
+ */
 export class FeatureGuard {
-    constructor(private client: SupabaseClient) { }
+    private resolver: FeatureResolverService;
+
+    constructor(private client: SupabaseClient) {
+        this.resolver = new FeatureResolverService(client);
+    }
 
     /**
      * Resolve features for a tenant (plan + overrides)
+     * Delegates to cached resolver
      */
     async resolveFeatures(tenantId: string): Promise<Set<string>> {
-        // Get subscription with plan
-        const { data: subscription } = await this.client
-            .from('subscriptions')
-            .select('plan:plans(included_features)')
-            .eq('tenant_id', tenantId)
-            .single();
-
-        // Plan is embedded as object when using .single()
-        const planFeatures = (subscription?.plan as any)?.included_features || [];
-        let features = new Set<string>(planFeatures);
-
-        // Get overrides
-        const { data: overrides } = await this.client
-            .from('tenant_feature_overrides')
-            .select('feature_key, enabled, expires_at')
-            .eq('tenant_id', tenantId);
-
-        // Apply overrides
-        if (overrides) {
-            for (const override of overrides) {
-                // Check if override is expired
-                if (override.expires_at) {
-                    const expiresAt = new Date(override.expires_at);
-                    if (expiresAt < new Date()) {
-                        continue; // Skip expired overrides
-                    }
-                }
-
-                if (override.enabled) {
-                    features.add(override.feature_key);
-                } else {
-                    features.delete(override.feature_key);
-                }
-            }
-        }
-
-        return features;
+        return this.resolver.resolveFeatures(tenantId);
     }
 
     /**

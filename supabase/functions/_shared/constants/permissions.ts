@@ -1,0 +1,54 @@
+export enum PermissionKeys {
+    // Projects
+    PROJECTS_READ = 'PROJECTS:READ',
+    PROJECTS_WRITE = 'PROJECTS:WRITE',
+
+    // Clients (CRM)
+    CLIENTS_READ = 'CLIENTS:READ',
+    CLIENTS_WRITE = 'CLIENTS:WRITE',
+
+    // Inventory
+    INVENTORY_READ = 'INVENTORY:READ',
+    INVENTORY_WRITE = 'INVENTORY:WRITE',
+
+    // Procurement
+    PROCUREMENT_READ = 'PROCUREMENT:READ',
+    PROCUREMENT_WRITE = 'PROCUREMENT:WRITE',
+    PROCUREMENT_APPROVE = 'PROCUREMENT:APPROVE',
+
+    // Finance
+    FINANCE_READ = 'FINANCE:READ',
+    FINANCE_WRITE = 'FINANCE:WRITE',
+    FINANCE_APPROVE = 'FINANCE:APPROVE',
+
+    // Contractors
+    CONTRACTORS_READ = 'CONTRACTORS:READ',
+    CONTRACTORS_WRITE = 'CONTRACTORS:WRITE',
+
+    // Reports
+    REPORTS_READ = 'REPORTS:READ',
+    REPORTS_EXPORT = 'REPORTS:EXPORT',
+
+    // Administration
+    USERS_READ = 'USERS:READ',
+    USERS_WRITE = 'USERS:WRITE',
+    ROLES_READ = 'ROLES:READ',
+    ROLES_WRITE = 'ROLES:WRITE',
+}
+
+export const MODULE_PERMISSIONS = {
+    CRM: [PermissionKeys.CLIENTS_READ, PermissionKeys.CLIENTS_WRITE],
+    PROJECTS: [PermissionKeys.PROJECTS_READ, PermissionKeys.PROJECTS_WRITE],
+    INVENTORY: [PermissionKeys.INVENTORY_READ, PermissionKeys.INVENTORY_WRITE],
+    PROCUREMENT: [
+        PermissionKeys.PROCUREMENT_READ,
+        PermissionKeys.PROCUREMENT_WRITE,
+        PermissionKeys.PROCUREMENT_APPROVE,
+    ],
+    FINANCE: [
+        PermissionKeys.FINANCE_READ,
+        PermissionKeys.FINANCE_WRITE,
+        PermissionKeys.FINANCE_APPROVE,
+    ],
+    CONTRACTORS: [PermissionKeys.CONTRACTORS_READ, PermissionKeys.CONTRACTORS_WRITE],
+};

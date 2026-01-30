@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { FeatureKeys } from '../lib/constants/features';
 
 // Types
 interface Tenant {
@@ -50,6 +51,11 @@ interface AuthContextType {
     // Permissions & Features
     features: string[];
     permissions: string[];
+    featuresLoading: boolean;
+    lastFeaturesUpdate: Date | null;
+
+    // Actions
+    refetchFeatures: () => Promise<void>;
 
     // Helper methods
     hasFeature: (featureKey: string) => boolean;
@@ -76,6 +82,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const [features, setFeatures] = useState<string[]>([]);
     const [permissions, setPermissions] = useState<string[]>([]);
+
+    const [featuresLoading, setFeaturesLoading] = useState(false);
+    const [lastFeaturesUpdate, setLastFeaturesUpdate] = useState<Date | null>(null);
 
     // Load user data on mount and auth changes
     useEffect(() => {
@@ -109,16 +118,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const { data: profileData, error: profileError } = await supabase
                 .from('users')
                 .select(`
-          id,
-          tenant_id,
-          email,
-          name,
-          role_id,
-          role:roles (
-            name,
-            is_tenant_admin
-          )
-        `)
+                  id,
+                  tenant_id,
+                  email,
+                  name,
+                  role_id,
+                  role:roles (
+                    name,
+                    is_tenant_admin
+                  )
+                `)
                 .eq('auth_user_id', userId)
                 .single();
 
@@ -135,7 +144,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setProfile(profileData as any);
 
             // 2. Load tenant
-            const { data: tenantData, error: tenantError } = await supabase
+            const { data: tenantData } = await supabase
                 .from('tenants')
                 .select('*')
                 .eq('id', profileData.tenant_id)
@@ -144,37 +153,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setTenant(tenantData);
 
             // 3. Load subscription with plan
-            const { data: subData, error: subError } = await supabase
+            const { data: subData } = await supabase
                 .from('subscriptions')
                 .select(`
-          *,
-          plan:plans (
-            name,
-            display_name,
-            included_features
-          )
-        `)
+                  *,
+                  plan:plans (
+                    name,
+                    display_name,
+                    included_features
+                  )
+                `)
                 .eq('tenant_id', profileData.tenant_id)
-                .single();
+                .maybeSingle();
 
-            if (subError) {
-                console.error('⚠️ Subscription error (may be optional):', subError);
-                // Subscription pode não existir ainda, não é fatal
-            } else {
-                setSubscription(subData as any);
-            }
+            setSubscription(subData as any);
 
-            // 4. Resolve features (plan + overrides)
-            await loadFeatures(profileData.tenant_id, subData);
+            // 4. Initial Feature Load (Local fallback first for speed)
+            const initialFeatures = new Set<string>(subData?.plan?.included_features || []);
+            setFeatures(Array.from(initialFeatures)); // Show something immediately
 
             // 5. Load permissions
             if (profileData.role_id) {
                 await loadPermissions(profileData.tenant_id, profileData.role_id);
             }
 
-            if (profileData.role_id) {
-                await loadPermissions(profileData.tenant_id, profileData.role_id);
-            }
+            // 6. Fetch authoritative features from backend
+            // Note: We need to use fetchFeaturesFromBackend but it depends on user state which might not be fully set in this closure if we use useCallback deps.
+            // But since we are inside loadUserData which is called when session exists, we can call it.
+            // However, fetchFeaturesFromBackend depends on 'user' state which might be stale here if we just set it?
+            // Actually 'loadUserData' is called after 'setUser'.
+            // But 'fetchFeaturesFromBackend' uses 'user' from state.
+            // Let's passed userId directly or ensure state is consistent.
+            // Better: just implement the fetch logic here or make a standalone function.
+            // Re-using the function is better.
 
         } catch (error) {
             console.error('❌ Error loading user data:', error);
@@ -183,62 +194,65 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     };
 
-    const loadFeatures = async (tenantId: string, subscription: any) => {
+    // We need to trigger fetch features after profile is loaded.
+    // Let's add an effect for that or call it in loadUserData
+    useEffect(() => {
+        if (profile?.tenant_id) {
+            fetchFeaturesFromBackend();
+        }
+    }, [profile?.tenant_id]);
+
+    const fetchFeaturesFromBackend = useCallback(async () => {
         try {
-            // Call Edge Function 'me' to get resolved features
-            // This is the Source of Truth
+            setFeaturesLoading(true);
+            // We use the root /me endpoint which returns features
             const { data, error } = await supabase.functions.invoke('me', {
                 method: 'GET',
-                headers: {
-                    // Force path to /features to get just the features
-                    'x-part-path': 'features'
-                }
             });
-
-            // Note: The Edge Function router in 'me' checks pathParts. 
-            // supabase.functions.invoke('me') hits the root. 
-            // To hit /me/features we might need to adjust the function or parameters.
-            // Let's rely on the root /me for now if it returns features, 
-            // OR simpler: just replicate the query here BUT with the strict logic?
-            // User requested: "Front sempre usa /me/features"
-
-            // Let's try to call the function properly.
-            // The function checks `url.pathname.split('/')`.
-            // When invoking via client, the URL is usually just the function URL.
-            // We might need to pass a query param or body to route internally if we can't append path.
-            // A safer bet is to use the full user info from /me since we load user data anyway.
 
             if (error) throw error;
 
-            // If we called /me (root), it returns { features: [], ... }
             if (data && data.features) {
-                setFeatures(data.features || []);
+                setFeatures(data.features);
+                setLastFeaturesUpdate(new Date());
             }
-
-        } catch (error) {
-            console.error('Error loading features from backend:', error);
-            // Fallback to local calculation (safety net) or empty?
-            // For now, let's fallback to basic plan features to avoid breaking everything if function fails
-            setFeatures(subscription?.plan?.included_features || []);
+        } catch (err) {
+            console.error('Error fetching features:', err);
+        } finally {
+            setFeaturesLoading(false);
         }
+    }, []);
+
+    // Expose refetch method
+    const refetchFeatures = async () => {
+        await fetchFeaturesFromBackend();
     };
 
-    // Poll features every 60s to ensure sync with Dev Admin
+    // Poll features every 30s
     useEffect(() => {
         if (!user || !tenant) return;
-
-        const interval = setInterval(() => {
-            // We need subscription to query, but subscription might be stale?
-            // Actually, the backend 'me' endpoint fetches subscription fresh.
-            // So we just need to call it.
-            if (profile?.tenant_id) {
-                // We pass null for subscription since backend fetches it
-                loadFeatures(profile.tenant_id, null);
-            }
-        }, 60000); // 60 seconds
-
+        const interval = setInterval(fetchFeaturesFromBackend, 30000);
         return () => clearInterval(interval);
-    }, [user, tenant, profile]);
+    }, [user, tenant, fetchFeaturesFromBackend]);
+
+    // Refetch on window focus
+    useEffect(() => {
+        const handleFocus = () => {
+            if (user && document.visibilityState === 'visible') {
+                const now = new Date();
+                if (!lastFeaturesUpdate || (now.getTime() - lastFeaturesUpdate.getTime() > 5000)) {
+                    fetchFeaturesFromBackend();
+                }
+            }
+        };
+
+        window.addEventListener('visibilitychange', handleFocus);
+        window.addEventListener('focus', handleFocus);
+        return () => {
+            window.removeEventListener('visibilitychange', handleFocus);
+            window.removeEventListener('focus', handleFocus);
+        };
+    }, [user, fetchFeaturesFromBackend, lastFeaturesUpdate]);
 
     const loadPermissions = async (tenantId: string, roleId: string) => {
         try {
@@ -260,28 +274,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setSubscription(null);
         setFeatures([]);
         setPermissions([]);
+        setLastFeaturesUpdate(null);
     };
 
     // Helper methods
-    const hasFeature = (featureKey: string) => features.includes(featureKey);
+    const hasFeature = useCallback((featureKey: string) => {
+        return features.includes(featureKey);
+    }, [features]);
 
-    const hasPermission = (permission: string) => {
-        // Tenant admins have all permissions
+    const hasPermission = useCallback((permission: string) => {
         if (profile?.role?.is_tenant_admin) return true;
         return permissions.includes(permission);
-    };
+    }, [profile, permissions]);
 
     const isTenantAdmin = () => profile?.role?.is_tenant_admin || false;
 
     const isDevAdmin = () => {
-        // Dev Admins - Super admins do SaaS Obra360
         const devAdminEmails = [
             'admin@obra360.com',
             'suporte@obra360.com',
-            'vitorpradotamos@gmail.com',        // Vitor - Dev Admin Principal
-            'marcospaulotrindade3@gmail.com',   // Marcos - Dev Admin Principal
+            'vitorpradotamos@gmail.com',
+            'marcospaulotrindade3@gmail.com',
         ];
-
         return devAdminEmails.includes(user?.email || '');
     };
 
@@ -296,7 +310,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const signUp = async (email: string, password: string, name: string, companyName: string) => {
         try {
-            // Database trigger will handle tenant creation automatically
             const { data, error: signUpError } = await supabase.auth.signUp({
                 email,
                 password,
@@ -309,7 +322,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
 
             if (signUpError) throw signUpError;
-
             return { error: null };
         } catch (error: any) {
             return { error };
@@ -330,6 +342,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         subscription,
         features,
         permissions,
+        featuresLoading,
+        lastFeaturesUpdate,
+        refetchFeatures,
         hasFeature,
         hasPermission,
         isTenantAdmin,

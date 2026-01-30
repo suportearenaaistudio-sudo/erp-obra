@@ -1,0 +1,9 @@
+{
+    "name": "saas-logsafe-incidents",
+    "version": "1.0.0",
+    "description": "LogSafe Incidents Management API",
+    "main": "index.ts",
+    "imports": {
+        "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.3"
+    }
+}

@@ -1,16 +1,29 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { z } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
+import { LogSafe } from '../../src/saas/logsafe/emitter.ts';
+import { SecurityEventType, ActorType } from '../../src/saas/logsafe/types.ts';
+import { validateRequest, createErrorResponse } from '../_shared/validation.ts';
+import {
+    checkDevAdminPermission,
+    createImpersonationToken,
+    verifyImpersonationToken,
+    logImpersonationAudit
+} from '../_shared/impersonation-jwt.ts';
+import { handleCORS } from '../_shared/security-headers.ts';
 
 /**
  * Dev Admin API - Impersonation System
- * 
+ *
  * Routes:
  * - POST /saas/support/impersonate - Start impersonation session
  * - POST /saas/support/end-impersonation - End impersonation session
- * 
- * Security: Requires Dev Admin authentication
- * Creates temporary JWT token with 15-minute expiration
- * All actions logged in support_session_logs and audit_logs
+ *
+ * Security:
+ * - Requires Dev Admin role in database (not hardcoded)
+ * - Creates signed JWT with 15-minute expiration
+ * - Comprehensive audit logging
  */
 
 const corsHeaders = {
@@ -18,37 +31,25 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const DEV_ADMIN_EMAILS = [
-    'admin@obra360.com',
-    'suporte@obra360.com',
-    'vitorpradotamos@gmail.com',
-    'marcospaulotrindade3@gmail.com',
-];
+// Validation schemas
+const impersonateSchema = z.object({
+    tenant_id: z.string().uuid('tenant_id deve ser um UUID válido'),
+    user_id: z.string().uuid('user_id deve ser um UUID válido'),
+    reason: z.string()
+        .min(10, 'Razão deve ter no mínimo 10 caracteres')
+        .max(500, 'Razão muito longa (máx 500 caracteres)'),
+});
 
-async function isDevAdmin(supabase: any, authHeader: string): Promise<{ isAdmin: boolean; saasUserId?: string; email?: string }> {
-    const { data: { user }, error } = await supabase.auth.getUser(authHeader.replace('Bearer ', ''));
-
-    if (error || !user || !DEV_ADMIN_EMAILS.includes(user.email)) {
-        return { isAdmin: false };
-    }
-
-    const { data: saasUser } = await supabase
-        .from('saas_users')
-        .select('id, email')
-        .eq('email', user.email)
-        .single();
-
-    return {
-        isAdmin: !!saasUser,
-        saasUserId: saasUser?.id,
-        email: saasUser?.email,
-    };
-}
+const endImpersonationSchema = z.object({
+    session_id: z.string().uuid('session_id deve ser um UUID válido'),
+});
 
 Deno.serve(async (req) => {
     if (req.method === 'OPTIONS') {
-        return new Response('ok', { headers: corsHeaders });
+        return handleCORS();
     }
+
+    let traceId: string | undefined;
 
     try {
         const supabase = createClient(
@@ -58,16 +59,37 @@ Deno.serve(async (req) => {
         );
 
         const authHeader = req.headers.get('Authorization');
-        if (!authHeader) {
-            throw new Error('Missing authorization header');
-        }
+        // Verify SaaS Access
+        const context = await pipeline.check(authHeader);
+        const { user, adminCheck } = context;
+        traceId = context.traceId;
 
-        const adminCheck = await isDevAdmin(supabase, authHeader);
-        if (!adminCheck.isAdmin) {
-            return new Response(
-                JSON.stringify({ error: 'Forbidden. Dev Admin access required.' }),
-                { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-            );
+        // Get SaaS User ID
+        const { data: saasUser } = await supabase.from('saas_users').select('id, email').eq('email', user.email).single();
+        if (!saasUser) throw new AppError(ErrorCode.FORBIDDEN, 'SaaS user not found', 403);
+
+        // RATE LIMITING for impersonation
+        const { EdgeRateLimiter, EdgeRateLimits } = await import('../_shared/rate-limiter.ts');
+        const limiter = new EdgeRateLimiter();
+        const rateLimitKey = `impersonate:${adminCheck.userId}`;
+
+        try {
+            await limiter.check(rateLimitKey, EdgeRateLimits.IMPERSONATION);
+        } catch (error: any) {
+            if (error.code === 'RATE_LIMIT_EXCEEDED') {
+                return new Response(
+                    JSON.stringify({
+                        error: error.message,
+                        code: 'RATE_LIMIT_EXCEEDED',
+                        retryAfter: error.retryAfter,
+                    }),
+                    {
+                        status: 429,
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Retry-After': String(error.retryAfter) },
+                    }
+                );
+            }
+            throw error;
         }
 
         const url = new URL(req.url);
@@ -75,63 +97,46 @@ Deno.serve(async (req) => {
 
         // Route: POST /saas/support/impersonate
         if (req.method === 'POST' && pathParts[pathParts.length - 1] === 'impersonate') {
-            const { tenant_id, user_id, reason } = await req.json();
-
-            if (!tenant_id || !user_id || !reason) {
-                throw new Error('Missing required fields: tenant_id, user_id, reason');
-            }
+            // VALIDATE INPUT
+            const { tenant_id, user_id, reason } = await validateRequest(req, impersonateSchema);
 
             // Validate user exists and belongs to tenant
             const { data: targetUser, error: userError } = await supabase
                 .from('users')
-                .select('id, email, name, tenant_id')
+                .select('id, name, email, tenant_id')
                 .eq('id', user_id)
                 .eq('tenant_id', tenant_id)
                 .single();
 
             if (userError || !targetUser) {
-                throw new Error('User not found or does not belong to specified tenant');
+                return new Response(
+                    JSON.stringify({ error: 'User not found or does not belong to specified tenant' }),
+                    { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                );
             }
 
-            // Calculate expiration (15 minutes from now)
-            const now = new Date();
-            const expiresAt = new Date(now.getTime() + 15 * 60 * 1000);
+            // Generate session ID
+            const sessionId = crypto.randomUUID();
 
-            // Create support session log
-            const { data: session, error: sessionError } = await supabase
-                .from('support_session_logs')
-                .insert({
-                    saas_user_id: adminCheck.saasUserId,
-                    tenant_id,
-                    impersonated_user_id: user_id,
-                    reason,
-                    started_at: now.toISOString(),
-                    expires_at: expiresAt.toISOString(),
-                    ip_address: req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip'),
-                    user_agent: req.headers.get('user-agent'),
-                })
-                .select()
-                .single();
+            // CREATE SIGNED JWT TOKEN
+            const token = await createImpersonationToken({
+                sessionId,
+                adminUserId: adminCheck.userId!,
+                adminEmail: user.email!,
+                targetTenantId: tenant_id,
+                targetUserId: user_id,
+                reason,
+            });
 
-            if (sessionError) throw sessionError;
-
-            // Create impersonation token
-            // Note: In production, you would create a proper JWT here
-            // For now, we'll return session info that the frontend can use
-            const impersonationToken = {
-                session_id: session.id,
+            // Store session in database
+            const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 min
+            await supabase.from('support_sessions').insert({
+                id: sessionId,
+                admin_id: adminCheck.userId,
                 tenant_id,
                 user_id,
-                is_impersonation: true,
-                saas_user_id: adminCheck.saasUserId,
-                saas_user_email: adminCheck.email,
-                expires_at: expiresAt.toISOString(),
-            };
-
-            // Audit log
-            await supabase.from('audit_logs').insert({
                 tenant_id,
-                saas_user_id: adminCheck.saasUserId,
+                saas_user_id: saasUser.id,
                 action: 'START_IMPERSONATION',
                 entity_type: 'SUPPORT_SESSION',
                 entity_id: session.id,
@@ -163,55 +168,72 @@ Deno.serve(async (req) => {
 
         // Route: POST /saas/support/end-impersonation
         if (req.method === 'POST' && pathParts[pathParts.length - 1] === 'end-impersonation') {
-            const { session_id } = await req.json();
-
-            if (!session_id) {
-                throw new Error('Missing required field: session_id');
-            }
+            // VALIDATE INPUT
+            const { session_id } = await validateRequest(req, endImpersonationSchema);
 
             // Get session
-            const { data: session } = await supabase
-                .from('support_session_logs')
+            const { data: session, error: sessionError } = await supabase
+                .from('support_sessions')
                 .select('*')
                 .eq('id', session_id)
                 .single();
 
-            if (!session) {
-                throw new Error('Session not found');
+            if (sessionError || !session) {
+                return new Response(
+                    JSON.stringify({ error: 'Session not found' }),
+                    { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                );
             }
 
-            // End session
-            const { error } = await supabase
-                .from('support_session_logs')
+            // VERIFY JWT TOKEN
+            try {
+                await verifyImpersonationToken(session.token);
+            } catch (error) {
+                // Token invalid or expired - still allow end, but log it
+                await logImpersonationAudit(supabase, {
+                    sessionId: session_id,
+                    adminUserId: adminCheck.userId!,
+                    adminEmail: user.email!,
+                    targetTenantId: session.tenant_id,
+                    targetUserId: session.user_id,
+                    action: 'EXPIRED',
+                    reason: `Invalid token: ${error.message}`,
+                });
+            }
+
+            // Mark session as ended
+            await supabase
+                .from('support_sessions')
                 .update({ ended_at: new Date().toISOString() })
                 .eq('id', session_id);
 
-            if (error) throw error;
-
-            // Audit log
-            await supabase.from('audit_logs').insert({
-                tenant_id: session.tenant_id,
-                saas_user_id: adminCheck.saasUserId,
-                action: 'END_IMPERSONATION',
-                entity_type: 'SUPPORT_SESSION',
-                entity_id: session_id,
+            // LOG AUDIT
+            await logImpersonationAudit(supabase, {
+                sessionId: session_id,
+                adminUserId: adminCheck.userId!,
+                adminEmail: user.email!,
+                targetTenantId: session.tenant_id,
+                targetUserId: session.user_id,
+                action: 'END',
+                ipAddress: req.headers.get('x-forwarded-for') || 'unknown',
+                userAgent: req.headers.get('user-agent') || 'unknown',
             });
 
             return new Response(
                 JSON.stringify({ success: true, message: 'Impersonation session ended' }),
-                { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             );
         }
 
         return new Response(
-            JSON.stringify({ error: 'Not found' }),
+            JSON.stringify({ error: 'Route not found' }),
             { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
 
     } catch (error) {
-        return new Response(
-            JSON.stringify({ error: error.message }),
-            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        return createErrorResponse(
+            error instanceof Error ? error : new Error('Unknown error'),
+            500
         );
     }
 });

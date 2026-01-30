@@ -10,19 +10,27 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { z } from 'https://esm.sh/zod@3.22.4'
+import { validateRequest, createErrorResponse, ValidationError } from '../_shared/validation.ts'
+import { getAuthenticatedUserWithTenant } from '../_shared/auth.ts'
+import { handleCORS, createSecureResponse } from '../_shared/security-headers.ts'
+import { maskPII, detectPromptInjection, checkAIQuota } from '../_shared/ai-security.ts'
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')!
 const GEMINI_MODEL = 'gemini-1.5-pro'
 
+// Validation schema
+const aiChatSchema = z.object({
+    conversationId: z.string().uuid().optional(),
+    message: z.string()
+        .min(1, 'Mensagem não pode estar vazia')
+        .max(4000, 'Mensagem muito longa (máx 4000 caracteres)'),
+})
+
 serve(async (req) => {
-    // CORS headers
+    // CORS headers with security
     if (req.method === 'OPTIONS') {
-        return new Response(null, {
-            headers: {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-            },
-        })
+        return handleCORS();
     }
 
     try {
@@ -72,14 +80,110 @@ serve(async (req) => {
             })
         }
 
-        // Parse request body
-        const { conversationId, message } = await req.json()
+        // Get subscription plan for rate limiting
+        const { data: subscription } = await supabaseClient
+            .from('subscriptions')
+            .select('plans(name)')
+            .eq('tenant_id', profile.tenant_id)
+            .maybeSingle();
 
-        if (!message) {
-            return new Response(JSON.stringify({ error: 'Message is required' }), {
-                status: 400,
-                headers: { 'Content-Type': 'application/json' },
-            })
+        const planName = (subscription?.plans as any)?.name || 'STARTER';
+
+        // APPLY RATE LIMITING based on plan
+        const { EdgeRateLimiter, getAIChatLimit } = await import('../_shared/rate-limiter.ts');
+        const limiter = new EdgeRateLimiter();
+        const rateLimitKey = `ai_chat:${profile.tenant_id}:${profile.id}`;
+        const limit = getAIChatLimit(planName);
+
+        try {
+            await limiter.check(rateLimitKey, limit);
+        } catch (error: any) {
+            if (error.code === 'RATE_LIMIT_EXCEEDED') {
+                return new Response(
+                    JSON.stringify({
+                        error: error.message,
+                        code: 'RATE_LIMIT_EXCEEDED',
+                        retryAfter: error.retryAfter,
+                        limit: `${limit.maxRequests} requests per ${limit.windowMs / 1000} seconds`,
+                        plan: planName,
+                    }),
+                    {
+                        status: 429,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Retry-After': String(error.retryAfter),
+                            'X-RateLimit-Limit': String(limit.maxRequests),
+                            'X-RateLimit-Window': String(limit.windowMs / 1000),
+                        },
+                    }
+                );
+            }
+            throw error;
+        }
+
+        // VALIDATE INPUT with Zod
+        const { conversationId, message } = await validateRequest(req, aiChatSchema)
+
+        // AI SECURITY: Check for prompt injection
+        const injectionCheck = detectPromptInjection(message);
+        if (injectionCheck.isInjection && injectionCheck.confidence !== 'low') {
+            // Log security event
+            await supabaseClient.from('audit_logs').insert({
+                event_type: 'AI_SECURITY_INJECTION_ATTEMPT',
+                tenant_id: profile.tenant_id,
+                actor_id: profile.id,
+                severity: injectionCheck.confidence,
+                metadata: {
+                    message: message.substring(0, 100),
+                    confidence: injectionCheck.confidence,
+                },
+                created_at: new Date().toISOString(),
+            });
+
+            return new Response(
+                JSON.stringify({
+                    error: 'Potential security violation detected in message',
+                    code: 'INJECTION_DETECTED',
+                }),
+                {
+                    status: 400,
+                    headers: { 'Content-Type': 'application/json' },
+                }
+            );
+        }
+
+        // AI SECURITY: Mask PII before sending to AI
+        const piiResult = maskPII(message);
+        const messageToAI = piiResult.maskedText;
+
+        if (piiResult.hasPII) {
+            // Log PII detection
+            await supabaseClient.from('audit_logs').insert({
+                event_type: 'AI_SECURITY_PII_DETECTED',
+                tenant_id: profile.tenant_id,
+                actor_id: profile.id,
+                severity: 'medium',
+                metadata: {
+                    detectedTypes: piiResult.detectedPII,
+                },
+                created_at: new Date().toISOString(),
+            });
+        }
+
+        // AI SECURITY: Check quota
+        const quotaCheck = await checkAIQuota(supabaseClient, profile.tenant_id, planName);
+        if (!quotaCheck.allowed) {
+            return new Response(
+                JSON.stringify({
+                    error: quotaCheck.reason,
+                    code: 'QUOTA_EXCEEDED',
+                    usage: quotaCheck.usage,
+                }),
+                {
+                    status: 429,
+                    headers: { 'Content-Type': 'application/json' },
+                }
+            );
         }
 
         const startTime = Date.now()
@@ -204,36 +308,30 @@ Responda de forma clara e objetiva. Use emojis quando apropriado.`,
             tool_calls_count: 0,
             safety_blocked: false,
         })
+        // Return response with security headers
+        return createSecureResponse({
+            success: true,
+            conversationId: finalConversationId,
+            message: aiResponse.text,
+            usage: {
+                promptTokens: aiResponse.usage?.promptTokens || 0,
+                completionTokens: aiResponse.usage?.completionTokens || 0,
+                totalTokens: aiResponse.usage?.totalTokens || 0,
+            },
+            latency: latencyMs,
+        });
 
-        return new Response(
-            JSON.stringify({
-                conversationId: conversation.id,
-                message: aiMessage,
-                metadata: {
-                    tokensUsed: geminiData.usageMetadata?.totalTokenCount || 0,
-                    latencyMs: latency,
-                },
-            }),
-            {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
-            }
-        )
     } catch (error) {
         console.error('Error:', error)
-        return new Response(
-            JSON.stringify({
-                error: error.message || 'Internal server error',
-            }),
-            {
-                status: 500,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
-            }
+
+        // Use standardized error response
+        if (error instanceof ValidationError) {
+            return createErrorResponse(error, 400)
+        }
+
+        return createErrorResponse(
+            error instanceof Error ? error : new Error('Unknown error'),
+            500
         )
     }
 })

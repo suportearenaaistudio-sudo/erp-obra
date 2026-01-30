@@ -1,15 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-
-/**
- * User Info API
- * 
- * Routes:
- * - GET /me - Get current user info with tenant, role, permissions, and features
- * - GET /me/features - Get resolved features for current tenant
- * 
- * Security: Requires authentication
- */
+import { SecurityPipeline } from '../_shared/security/pipeline.ts';
+import { RequestContext, UserType } from '../_shared/types/context.ts';
+import { generateTraceId } from '../_shared/logging/logger.ts';
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -41,106 +34,102 @@ Deno.serve(async (req) => {
             throw new Error('Unauthorized');
         }
 
+        // Build Request Context
+        // We need to fetch tenant_id first to build context
+        const { data: profile } = await supabase
+            .from('users')
+            .select('tenant_id, role:roles(is_tenant_admin)')
+            .eq('auth_user_id', user.id)
+            .single();
+
+        const tenantId = profile?.tenant_id;
+        const traceId = generateTraceId();
+
+        const context: RequestContext = {
+            userType: UserType.TENANT, // Default validation as tenant user
+            userId: user.id, // Auth user ID
+            email: user.email,
+            tenantId: tenantId,
+            traceId,
+            ipAddress: req.headers.get('x-forwarded-for') || '',
+            userAgent: req.headers.get('user-agent') || '',
+        };
+
+        const pipeline = new SecurityPipeline(supabase);
+
         const url = new URL(req.url);
         const pathParts = url.pathname.split('/').filter(Boolean);
+        const section = url.searchParams.get('section');
 
-        // Route: GET /me
-        if (req.method === 'GET' && pathParts.length === 1) {
-            // Get user profile with full context
-            const { data: profile } = await supabase
+        // Route: GET /me (or ?section=full)
+        if (req.method === 'GET' && (pathParts.length === 1 && !section || section === 'full')) {
+            // Get full profile
+            const { data: fullProfile } = await supabase
                 .from('users')
                 .select(`
-          id,
-          tenant_id,
-          email,
-          name,
-          avatar_url,
-          role_id,
-          role:roles(
-            id,
-            name,
-            is_tenant_admin
-          ),
-          tenant:tenants(
-            id,
-            name,
-            slug,
-            status
-          )
-        `)
+                  id,
+                  tenant_id,
+                  email,
+                  name,
+                  avatar_url,
+                  role_id,
+                  role:roles(
+                    id,
+                    name,
+                    is_tenant_admin
+                  ),
+                  tenant:tenants(
+                    id,
+                    name,
+                    slug,
+                    status
+                  )
+                `)
                 .eq('auth_user_id', user.id)
                 .single();
 
-            if (!profile) {
+            if (!fullProfile) {
                 throw new Error('Profile not found');
             }
 
-            // Get subscription
+            // Get Subscription
             const { data: subscription } = await supabase
                 .from('subscriptions')
                 .select(`
-          id,
-          status,
-          trial_end,
-          current_period_end,
-          plan:plans(
-            name,
-            display_name,
-            included_features
-          )
-        `)
-                .eq('tenant_id', profile.tenant_id)
+                  id,
+                  status,
+                  trial_end,
+                  current_period_end,
+                  plan:plans(
+                    name,
+                    display_name,
+                    included_features
+                  )
+                `)
+                .eq('tenant_id', tenantId)
                 .single();
 
-            // Get permissions
-            let permissions: string[] = [];
-            if (profile.role?.is_tenant_admin) {
-                permissions = ['*']; // All permissions
-            } else if (profile.role_id) {
-                const { data: perms } = await supabase
-                    .from('role_permissions')
-                    .select('permission_key')
-                    .eq('tenant_id', profile.tenant_id)
-                    .eq('role_id', profile.role_id);
+            // Resolve features and permissions using pipeline
+            const features = await pipeline.getFeatures(tenantId);
 
-                permissions = perms?.map(p => p.permission_key) || [];
-            }
-
-            // Resolve features (plan + overrides)
-            let features = [...(subscription?.plan?.included_features || [])];
-
-            const { data: overrides } = await supabase
-                .from('tenant_feature_overrides')
-                .select('feature_key, enabled, expires_at')
-                .eq('tenant_id', profile.tenant_id);
-
-            if (overrides) {
-                for (const override of overrides) {
-                    // Check expiration
-                    if (override.expires_at && new Date(override.expires_at) < new Date()) {
-                        continue;
-                    }
-
-                    if (override.enabled) {
-                        features.push(override.feature_key);
-                    } else {
-                        features = features.filter(f => f !== override.feature_key);
-                    }
-                }
-            }
-
-            features = [...new Set(features)]; // Unique
+            // For permissions, we need to pass the INTERNAL user ID (uuid), not auth_user_id
+            // But RBACGuard usually expects the user ID that is in the users table?
+            // Let's check RBACGuard implementation.
+            // "eq('id', userId)" -> It expects the PUBLIC.USERS.ID.
+            // "user.id" from auth.getUser() is AUTH.USERS.ID.
+            // We need to pass fullProfile.id to check permissions.
+            const permissions = await pipeline.getPermissions(tenantId, fullProfile.id);
 
             return new Response(
                 JSON.stringify({
                     user: {
-                        id: profile.id,
-                        email: profile.email,
-                        name: profile.name,
-                        avatar_url: profile.avatar_url,
+                        id: fullProfile.id,
+                        email: fullProfile.email,
+                        name: fullProfile.name,
+                        avatar_url: fullProfile.avatar_url,
                     },
-                    tenant: profile.tenant,
-                    role: profile.role,
+                    tenant: fullProfile.tenant,
+                    role: fullProfile.role,
                     subscription,
                     permissions,
                     features,
@@ -150,53 +139,21 @@ Deno.serve(async (req) => {
         }
 
         // Route: GET /me/features
-        if (req.method === 'GET' && pathParts.length === 2 && pathParts[1] === 'features') {
-            const { data: profile } = await supabase
-                .from('users')
-                .select('tenant_id')
-                .eq('auth_user_id', user.id)
-                .single();
+        if (req.method === 'GET' && ((pathParts.length === 2 && pathParts[1] === 'features') || section === 'features')) {
+            if (!tenantId) throw new Error('Tenant context required');
 
-            if (!profile) {
-                throw new Error('Profile not found');
-            }
+            const features = await pipeline.getFeatures(tenantId);
 
-            // Get subscription
+            // Get simple subscription details for frontend context
             const { data: subscription } = await supabase
                 .from('subscriptions')
-                .select('plan:plans(included_features)')
-                .eq('tenant_id', profile.tenant_id)
-                .single();
-
-            // 1. Start with plan features
-            const planFeatures = subscription?.plan?.included_features || [];
-            let resolvedFeatures = new Set(planFeatures);
-
-            // 2. Get overrides
-            const { data: overrides } = await supabase
-                .from('tenant_feature_overrides')
-                .select('*')
-                .eq('tenant_id', profile.tenant_id);
-
-            // 3. Apply overrides
-            if (overrides) {
-                for (const override of overrides) {
-                    // Check expiration
-                    if (override.expires_at && new Date(override.expires_at) < new Date()) {
-                        continue;
-                    }
-
-                    if (override.enabled) {
-                        resolvedFeatures.add(override.feature_key);
-                    } else {
-                        resolvedFeatures.delete(override.feature_key);
-                    }
-                }
-            }
+                .select('status, plan:plans(included_features)')
+                .eq('tenant_id', tenantId)
+                .maybeSingle();
 
             return new Response(
                 JSON.stringify({
-                    features: Array.from(resolvedFeatures),
+                    features,
                     plan: subscription?.plan,
                     status: subscription?.status
                 }),

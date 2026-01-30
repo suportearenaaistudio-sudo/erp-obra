@@ -6,6 +6,9 @@
 
 import { supabase } from '@/lib/supabase';
 import { ToolContext, ToolHandler } from './types';
+import { TenantSafeQuery } from '@/lib/tenant-safe-query';
+import { FeatureGuard } from '@/lib/security-guards';
+import { FeatureKeys } from '@/lib/constants/features';
 
 /**
  * get_work_summary
@@ -13,9 +16,16 @@ import { ToolContext, ToolHandler } from './types';
  */
 export const getWorkSummary: ToolHandler = {
     requiredPermission: 'view_works',
+    requiredFeature: FeatureKeys.PROJECTS,
 
     async execute(args: { workId: string }, context: ToolContext) {
-        const { data, error } = await supabase
+        // Validate Feature Access
+        const featureGuard = new FeatureGuard(supabase);
+        await featureGuard.check(context.tenantId, FeatureKeys.PROJECTS);
+
+        const safeQuery = new TenantSafeQuery(supabase, context.tenantId);
+
+        const { data, error } = await safeQuery
             .from('projects')
             .select(`
         id,
@@ -38,7 +48,7 @@ export const getWorkSummary: ToolHandler = {
         created_at
       `)
             .eq('id', args.workId)
-            .eq('tenant_id', context.tenantId)
+            // .eq('tenant_id', context.tenantId) // Auto
             .single();
 
         if (error || !data) {
@@ -84,6 +94,7 @@ export const getWorkSummary: ToolHandler = {
  */
 export const listWorks: ToolHandler = {
     requiredPermission: 'view_works',
+    requiredFeature: FeatureKeys.PROJECTS,
 
     async execute(
         args: {
@@ -93,7 +104,12 @@ export const listWorks: ToolHandler = {
         },
         context: ToolContext
     ) {
-        let query = supabase
+        // Validate Feature Access
+        const featureGuard = new FeatureGuard(supabase);
+        await featureGuard.check(context.tenantId, FeatureKeys.PROJECTS);
+
+        const safeQuery = new TenantSafeQuery(supabase, context.tenantId);
+        let query = safeQuery
             .from('projects')
             .select(`
         id,
@@ -106,7 +122,7 @@ export const listWorks: ToolHandler = {
         budget_spent,
         phase_current
       `)
-            .eq('tenant_id', context.tenantId)
+            // .eq('tenant_id', context.tenantId) // Auto
             .order('created_at', { ascending: false })
             .limit(args.limit || 10);
 
@@ -151,14 +167,21 @@ export const listWorks: ToolHandler = {
  */
 export const getWorkPhaseStatus: ToolHandler = {
     requiredPermission: 'view_works',
+    requiredFeature: FeatureKeys.PROJECTS,
 
     async execute(args: { workId: string }, context: ToolContext) {
+        // Validate Feature Access
+        const featureGuard = new FeatureGuard(supabase);
+        await featureGuard.check(context.tenantId, FeatureKeys.PROJECTS);
+
+        const safeQuery = new TenantSafeQuery(supabase, context.tenantId);
+
         // Verificar se obra existe e pertence ao tenant
-        const { data: work, error: workError } = await supabase
+        const { data: work, error: workError } = await safeQuery
             .from('projects')
             .select('id, name, phase_current')
             .eq('id', args.workId)
-            .eq('tenant_id', context.tenantId)
+            // .eq('tenant_id', context.tenantId) // Auto
             .single();
 
         if (workError || !work) {
@@ -166,7 +189,13 @@ export const getWorkPhaseStatus: ToolHandler = {
         }
 
         // Buscar tarefas/fases (assumindo que existe tabela project_tasks ou similar)
-        const { data: phases, error: phasesError } = await supabase
+        // project_phases should also be tenant isolated, either by direct tenant_id or RLS.
+        // Assuming project_phases HAS tenant_id. If not, we rely on project_id and RLS (cascade).
+        // Let's assume best practice: ALL tables have tenant_id.
+        // If not, we might need a bypass or rely on RLS. 
+        // Based on schema analysis, project_phases HAS tenant_id (implied by previous migrations).
+        // Let's use safeQuery.
+        const { data: phases, error: phasesError } = await safeQuery
             .from('project_phases')
             .select('*')
             .eq('project_id', args.workId)

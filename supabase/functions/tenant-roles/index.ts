@@ -1,78 +1,39 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-
-/**
- * Tenant Admin API - Role Management
- * 
- * Routes:
- * - GET /tenant/roles - List all roles in tenant
- * - POST /tenant/roles - Create new role
- * - PUT /tenant/roles/:id - Update role
- * - DELETE /tenant/roles/:id - Delete role
- * - GET /tenant/roles/:id/permissions - Get role permissions
- * - PUT /tenant/roles/:id/permissions - Update role permissions
- * 
- * Security: Requires ROLES:READ or ROLES:WRITE permission
- */
+import { SecurityPipeline } from '../_shared/security/pipeline.ts';
+import { RequestContext, UserType } from '../_shared/types/context.ts';
+import { AppError, ErrorCode, errorResponse } from '../_shared/errors/errors.ts';
+import { generateTraceId } from '../_shared/logging/logger.ts';
+import { validateRequest } from '../_shared/validation/validation.ts';
+import { z } from 'zod';
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-interface RequestContext {
-    tenantId: string;
-    userId: string;
-    permissions: Set<string>;
-}
+// Validation Schemas
+const createRoleSchema = z.object({
+    name: z.string().min(2),
+    description: z.string().optional(),
+    permissions: z.array(z.string()).optional(),
+});
 
-async function getRequestContext(supabase: any, authHeader: string): Promise<RequestContext> {
-    const { data: { user }, error } = await supabase.auth.getUser(authHeader.replace('Bearer ', ''));
+const updateRoleSchema = z.object({
+    name: z.string().min(2).optional(),
+    description: z.string().optional(),
+});
 
-    if (error || !user) {
-        throw new Error('Unauthorized');
-    }
-
-    const { data: profile } = await supabase
-        .from('users')
-        .select(`
-      id,
-      tenant_id,
-      role:roles(
-        is_tenant_admin,
-        permissions:role_permissions(permission_key)
-      )
-    `)
-        .eq('auth_user_id', user.id)
-        .single();
-
-    if (!profile) {
-        throw new Error('Profile not found');
-    }
-
-    const permissions = new Set<string>();
-
-    if (profile.role?.is_tenant_admin) {
-        permissions.add('*');
-    } else if (profile.role?.permissions) {
-        profile.role.permissions.forEach((p: any) => permissions.add(p.permission_key));
-    }
-
-    return {
-        tenantId: profile.tenant_id,
-        userId: profile.id,
-        permissions,
-    };
-}
-
-function hasPermission(permissions: Set<string>, required: string): boolean {
-    return permissions.has('*') || permissions.has(required);
-}
+const updatePermissionsSchema = z.object({
+    permissions: z.array(z.string()),
+});
 
 Deno.serve(async (req) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders });
     }
+
+    const traceId = generateTraceId();
 
     try {
         const supabase = createClient(
@@ -82,55 +43,65 @@ Deno.serve(async (req) => {
         );
 
         const authHeader = req.headers.get('Authorization');
-        if (!authHeader) {
-            throw new Error('Missing authorization header');
-        }
+        if (!authHeader) throw new AppError(ErrorCode.UNAUTHORIZED, 'Missing authorization header', 401);
 
-        const context = await getRequestContext(supabase, authHeader);
+        const { data: { user }, error: authError } = await supabase.auth.getUser(authHeader.replace('Bearer ', ''));
+        if (authError || !user) throw new AppError(ErrorCode.UNAUTHORIZED, 'Unauthorized', 401);
+
+        // Build Tenant Context
+        const { data: profile } = await supabase
+            .from('users')
+            .select('tenant_id, role:roles(is_tenant_admin)')
+            .eq('auth_user_id', user.id)
+            .single();
+
+        if (!profile) throw new AppError(ErrorCode.UNAUTHORIZED, 'Profile not found', 401);
+
+        const context: RequestContext = {
+            userType: UserType.TENANT,
+            userId: user.id,
+            email: user.email,
+            tenantId: profile.tenant_id,
+            traceId,
+            ipAddress: req.headers.get('x-forwarded-for') || '',
+            userAgent: req.headers.get('user-agent') || '',
+        };
+
+        const pipeline = new SecurityPipeline(supabase);
         const url = new URL(req.url);
         const pathParts = url.pathname.split('/').filter(Boolean);
 
-        // Route: GET /tenant/roles
-        if (req.method === 'GET' && pathParts.length === 2) {
-            if (!hasPermission(context.permissions, 'ROLES:READ')) {
-                return new Response(
-                    JSON.stringify({ error: 'Permission denied. Required: ROLES:READ' }),
-                    { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-                );
-            }
+        // Standard Routing Logic
+        // pathParts might be ['tenant-roles'] or ['tenant-roles', 'ID'] ...
+
+        // Route: GET / (List)
+        if (req.method === 'GET' && pathParts.length <= 1) {
+            await pipeline.check(context, { permission: 'ROLES:READ' });
 
             const { data: roles, error } = await supabase
                 .from('roles')
                 .select(`
-          id,
-          name,
-          description,
-          is_tenant_admin,
-          is_default,
-          created_at,
-          permissions:role_permissions(permission_key)
-        `)
+                  id,
+                  name,
+                  description,
+                  is_tenant_admin,
+                  is_default,
+                  created_at,
+                  permissions:role_permissions(permission_key)
+                `)
                 .eq('tenant_id', context.tenantId)
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
 
-            return new Response(
-                JSON.stringify({ roles }),
-                { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-            );
+            return new Response(JSON.stringify({ roles }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
 
-        // Route: POST /tenant/roles
-        if (req.method === 'POST' && pathParts.length === 2) {
-            if (!hasPermission(context.permissions, 'ROLES:WRITE')) {
-                return new Response(
-                    JSON.stringify({ error: 'Permission denied. Required: ROLES:WRITE' }),
-                    { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-                );
-            }
+        // Route: POST / (Create)
+        if (req.method === 'POST' && pathParts.length <= 1) {
+            await pipeline.check(context, { permission: 'ROLES:WRITE' });
 
-            const { name, description, permissions: rolePermissions } = await req.json();
+            const { name, description, permissions: rolePermissions } = await validateRequest(req, createRoleSchema);
 
             // Create role
             const { data: newRole, error: roleError } = await supabase
@@ -154,194 +125,134 @@ Deno.serve(async (req) => {
                     role_id: newRole.id,
                     permission_key: perm,
                 }));
-
-                const { error: permError } = await supabase
-                    .from('role_permissions')
-                    .insert(permissionInserts);
-
+                const { error: permError } = await supabase.from('role_permissions').insert(permissionInserts);
                 if (permError) throw permError;
             }
 
-            // Audit log
+            // Need internal User ID for audit
+            const { data: internalUser } = await supabase.from('users').select('id').eq('auth_user_id', user.id).single();
+
+            // Audit
             await supabase.from('audit_logs').insert({
                 tenant_id: context.tenantId,
-                user_id: context.userId,
+                user_id: internalUser?.id,
                 action: 'CREATE_ROLE',
                 entity_type: 'ROLE',
                 entity_id: newRole.id,
                 new_values: { name, description, permissions: rolePermissions },
             });
 
-            return new Response(
-                JSON.stringify({ role: newRole }),
-                { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-            );
+            return new Response(JSON.stringify({ role: newRole }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
 
-        // Route: PUT /tenant/roles/:id
-        if (req.method === 'PUT' && pathParts.length === 3 && pathParts[2] !== 'permissions') {
-            if (!hasPermission(context.permissions, 'ROLES:WRITE')) {
-                return new Response(
-                    JSON.stringify({ error: 'Permission denied. Required: ROLES:WRITE' }),
-                    { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-                );
-            }
+        if (pathParts.length >= 2) {
+            const roleId = pathParts[1];
+            const subResource = pathParts[2]; // e.g. 'permissions'
 
-            const roleId = pathParts[2];
-            const updates = await req.json();
-
-            const { data: updatedRole, error } = await supabase
-                .from('roles')
-                .update(updates)
-                .eq('id', roleId)
-                .eq('tenant_id', context.tenantId)
-                .select()
-                .single();
-
-            if (error) throw error;
-
-            // Audit log
-            await supabase.from('audit_logs').insert({
-                tenant_id: context.tenantId,
-                user_id: context.userId,
-                action: 'UPDATE_ROLE',
-                entity_type: 'ROLE',
-                entity_id: roleId,
-                new_values: updates,
-            });
-
-            return new Response(
-                JSON.stringify({ role: updatedRole }),
-                { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-            );
-        }
-
-        // Route: DELETE /tenant/roles/:id
-        if (req.method === 'DELETE' && pathParts.length === 3) {
-            if (!hasPermission(context.permissions, 'ROLES:WRITE')) {
-                return new Response(
-                    JSON.stringify({ error: 'Permission denied. Required: ROLES:WRITE' }),
-                    { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-                );
-            }
-
-            const roleId = pathParts[2];
-
-            const { error } = await supabase
-                .from('roles')
-                .delete()
-                .eq('id', roleId)
-                .eq('tenant_id', context.tenantId);
-
-            if (error) throw error;
-
-            // Audit log
-            await supabase.from('audit_logs').insert({
-                tenant_id: context.tenantId,
-                user_id: context.userId,
-                action: 'DELETE_ROLE',
-                entity_type: 'ROLE',
-                entity_id: roleId,
-            });
-
-            return new Response(
-                JSON.stringify({ success: true }),
-                { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-            );
-        }
-
-        // Route: GET /tenant/roles/:id/permissions
-        if (req.method === 'GET' && pathParts.length === 4 && pathParts[3] === 'permissions') {
-            if (!hasPermission(context.permissions, 'ROLES:READ')) {
-                return new Response(
-                    JSON.stringify({ error: 'Permission denied. Required: ROLES:READ' }),
-                    { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-                );
-            }
-
-            const roleId = pathParts[2];
-
-            const { data: permissions, error } = await supabase
-                .from('role_permissions')
-                .select('permission_key')
-                .eq('tenant_id', context.tenantId)
-                .eq('role_id', roleId);
-
-            if (error) throw error;
-
-            return new Response(
-                JSON.stringify({ permissions: permissions.map(p => p.permission_key) }),
-                { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-            );
-        }
-
-        // Route: PUT /tenant/roles/:id/permissions
-        if (req.method === 'PUT' && pathParts.length === 4 && pathParts[3] === 'permissions') {
-            if (!hasPermission(context.permissions, 'ROLES:WRITE')) {
-                return new Response(
-                    JSON.stringify({ error: 'Permission denied. Required: ROLES:WRITE' }),
-                    { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-                );
-            }
-
-            const roleId = pathParts[2];
-            const { permissions: newPermissions } = await req.json();
-
-            // Get old permissions for audit
-            const { data: oldPerms } = await supabase
-                .from('role_permissions')
-                .select('permission_key')
-                .eq('tenant_id', context.tenantId)
-                .eq('role_id', roleId);
-
-            // Delete existing permissions
-            await supabase
-                .from('role_permissions')
-                .delete()
-                .eq('tenant_id', context.tenantId)
-                .eq('role_id', roleId);
-
-            // Insert new permissions
-            if (newPermissions && newPermissions.length > 0) {
-                const permissionInserts = newPermissions.map((perm: string) => ({
-                    tenant_id: context.tenantId,
-                    role_id: roleId,
-                    permission_key: perm,
-                }));
-
-                const { error: insertError } = await supabase
+            // GET /:id/permissions
+            if (subResource === 'permissions' && req.method === 'GET') {
+                await pipeline.check(context, { permission: 'ROLES:READ' });
+                const { data: permissions, error } = await supabase
                     .from('role_permissions')
-                    .insert(permissionInserts);
+                    .select('permission_key')
+                    .eq('tenant_id', context.tenantId)
+                    .eq('role_id', roleId);
+                if (error) throw error;
 
-                if (insertError) throw insertError;
+                return new Response(JSON.stringify({ permissions: permissions.map(p => p.permission_key) }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
             }
 
-            // Audit log
-            await supabase.from('audit_logs').insert({
-                tenant_id: context.tenantId,
-                user_id: context.userId,
-                action: 'UPDATE_PERMISSIONS',
-                entity_type: 'ROLE',
-                entity_id: roleId,
-                old_values: { permissions: oldPerms?.map(p => p.permission_key) || [] },
-                new_values: { permissions: newPermissions },
-            });
+            // PUT /:id/permissions
+            if (subResource === 'permissions' && req.method === 'PUT') {
+                await pipeline.check(context, { permission: 'ROLES:WRITE' });
+                const { permissions: newPermissions } = await validateRequest(req, updatePermissionsSchema);
 
-            return new Response(
-                JSON.stringify({ success: true, permissions: newPermissions }),
-                { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-            );
+                // Audit - get old
+                const { data: oldPerms } = await supabase.from('role_permissions').select('permission_key').eq('tenant_id', context.tenantId).eq('role_id', roleId);
+
+                // Delete existing
+                await supabase.from('role_permissions').delete().eq('tenant_id', context.tenantId).eq('role_id', roleId);
+
+                // Insert new
+                if (newPermissions && newPermissions.length > 0) {
+                    const permissionInserts = newPermissions.map((perm: string) => ({
+                        tenant_id: context.tenantId,
+                        role_id: roleId,
+                        permission_key: perm,
+                    }));
+                    const { error: insertError } = await supabase.from('role_permissions').insert(permissionInserts);
+                    if (insertError) throw insertError;
+                }
+
+                const { data: internalUser } = await supabase.from('users').select('id').eq('auth_user_id', user.id).single();
+
+                await supabase.from('audit_logs').insert({
+                    tenant_id: context.tenantId,
+                    user_id: internalUser?.id,
+                    action: 'UPDATE_PERMISSIONS',
+                    entity_type: 'ROLE',
+                    entity_id: roleId,
+                    old_values: { permissions: oldPerms?.map(p => p.permission_key) || [] },
+                    new_values: { permissions: newPermissions },
+                });
+
+                return new Response(JSON.stringify({ success: true, permissions: newPermissions }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+            }
+
+            // PUT /:id (Update Role Metadata)
+            if (req.method === 'PUT' && !subResource) {
+                await pipeline.check(context, { permission: 'ROLES:WRITE' });
+                const updates = await validateRequest(req, updateRoleSchema);
+
+                const { data: updatedRole, error } = await supabase
+                    .from('roles')
+                    .update(updates)
+                    .eq('id', roleId)
+                    .eq('tenant_id', context.tenantId)
+                    .select()
+                    .single();
+                if (error) throw error;
+
+                const { data: internalUser } = await supabase.from('users').select('id').eq('auth_user_id', user.id).single();
+
+                await supabase.from('audit_logs').insert({
+                    tenant_id: context.tenantId,
+                    user_id: internalUser?.id,
+                    action: 'UPDATE_ROLE',
+                    entity_type: 'ROLE',
+                    entity_id: roleId,
+                    new_values: updates,
+                });
+
+                return new Response(JSON.stringify({ role: updatedRole }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+            }
+
+            // DELETE /:id
+            if (req.method === 'DELETE' && !subResource) {
+                await pipeline.check(context, { permission: 'ROLES:WRITE' });
+
+                const { error } = await supabase.from('roles').delete().eq('id', roleId).eq('tenant_id', context.tenantId);
+                if (error) throw error;
+
+                const { data: internalUser } = await supabase.from('users').select('id').eq('auth_user_id', user.id).single();
+
+                await supabase.from('audit_logs').insert({
+                    tenant_id: context.tenantId,
+                    user_id: internalUser?.id,
+                    action: 'DELETE_ROLE',
+                    entity_type: 'ROLE',
+                    entity_id: roleId,
+                });
+
+                return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+            }
         }
 
-        return new Response(
-            JSON.stringify({ error: 'Not found' }),
-            { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        throw new AppError(ErrorCode.NOT_FOUND, 'Route not found', 404);
 
     } catch (error) {
-        return new Response(
-            JSON.stringify({ error: error.message }),
-            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        const appError = error instanceof AppError ? error : new AppError(ErrorCode.INTERNAL_ERROR, error.message);
+        const response = errorResponse(appError, traceId);
+        return new Response(JSON.stringify(response), { status: appError.statusCode, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 });
