@@ -5,7 +5,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
-import { PolicyEngine } from '../../src/saas/logsafe/policy-engine.ts';
+import { PolicyEngine } from '../_shared/policy-engine.ts';
 
 serve(async (req) => {
     try {

@@ -108,7 +108,7 @@ export const LogSafeIncidentsService = {
         if (filters?.offset) params.append('offset', filters.offset.toString());
 
         const response = await fetch(
-            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas/logsafe/incidents?${params}`,
+            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas-logsafe-incidents/incidents?${params}`,
             {
                 headers: {
                     'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
@@ -125,7 +125,7 @@ export const LogSafeIncidentsService = {
      */
     async getDetails(incidentId: string) {
         const response = await fetch(
-            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas/logsafe/incidents/${incidentId}`,
+            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas-logsafe-incidents/incidents/${incidentId}`,
             {
                 headers: {
                     'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
@@ -142,7 +142,7 @@ export const LogSafeIncidentsService = {
      */
     async acknowledge(incidentId: string) {
         const response = await fetch(
-            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas/logsafe/incidents/${incidentId}/ack`,
+            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas-logsafe-incidents/incidents/${incidentId}/ack`,
             {
                 method: 'POST',
                 headers: {
@@ -161,7 +161,7 @@ export const LogSafeIncidentsService = {
      */
     async resolve(incidentId: string, resolutionNotes: string) {
         const response = await fetch(
-            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas/logsafe/incidents/${incidentId}/resolve`,
+            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas-logsafe-incidents/incidents/${incidentId}/resolve`,
             {
                 method: 'POST',
                 headers: {
@@ -190,7 +190,7 @@ export const LogSafeIncidentsService = {
         }
     ) {
         const response = await fetch(
-            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas/logsafe/incidents/${incidentId}/actions`,
+            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas-logsafe-incidents/incidents/${incidentId}/actions`,
             {
                 method: 'POST',
                 headers: {
@@ -216,7 +216,7 @@ export const LogSafePoliciesService = {
      */
     async list() {
         const response = await fetch(
-            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas/logsafe/policies`,
+            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas-logsafe-policies/policies`,
             {
                 headers: {
                     'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
@@ -233,7 +233,7 @@ export const LogSafePoliciesService = {
      */
     async enable(policyId: string) {
         const response = await fetch(
-            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas/logsafe/policies/${policyId}/enable`,
+            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas-logsafe-policies/policies/${policyId}/enable`,
             {
                 method: 'POST',
                 headers: {
@@ -251,7 +251,7 @@ export const LogSafePoliciesService = {
      */
     async disable(policyId: string) {
         const response = await fetch(
-            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas/logsafe/policies/${policyId}/disable`,
+            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas-logsafe-policies/policies/${policyId}/disable`,
             {
                 method: 'POST',
                 headers: {
@@ -269,7 +269,7 @@ export const LogSafePoliciesService = {
      */
     async update(policyId: string, updates: Partial<LogSafePolicy>) {
         const response = await fetch(
-            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas/logsafe/policies/${policyId}`,
+            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas-logsafe-policies/policies/${policyId}`,
             {
                 method: 'PUT',
                 headers: {
@@ -314,7 +314,7 @@ export const LogSafeEventsService = {
         if (filters?.offset) params.append('offset', filters.offset.toString());
 
         const response = await fetch(
-            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas/logsafe/events?${params}`,
+            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas-logsafe-events/events?${params}`,
             {
                 headers: {
                     'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
@@ -342,7 +342,7 @@ export const LogSafeEventsService = {
         if (params.hours) queryParams.append('hours', params.hours.toString());
 
         const response = await fetch(
-            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas/logsafe/events/timeline?${queryParams}`,
+            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas-logsafe-events/events/timeline?${queryParams}`,
             {
                 headers: {
                     'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
@@ -359,7 +359,7 @@ export const LogSafeEventsService = {
      */
     async stats(hours: number = 24) {
         const response = await fetch(
-            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas/logsafe/events/stats?hours=${hours}`,
+            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/saas-logsafe-events/events/stats?hours=${hours}`,
             {
                 headers: {
                     'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
