@@ -168,32 +168,38 @@ Deno.serve(async (req) => {
                 .eq('tenant_id', profile.tenant_id)
                 .single();
 
-            // Resolve features
-            let features = [...(subscription?.plan?.included_features || [])];
+            // 1. Start with plan features
+            const planFeatures = subscription?.plan?.included_features || [];
+            let resolvedFeatures = new Set(planFeatures);
 
+            // 2. Get overrides
             const { data: overrides } = await supabase
                 .from('tenant_feature_overrides')
-                .select('feature_key, enabled, expires_at')
+                .select('*')
                 .eq('tenant_id', profile.tenant_id);
 
+            // 3. Apply overrides
             if (overrides) {
                 for (const override of overrides) {
+                    // Check expiration
                     if (override.expires_at && new Date(override.expires_at) < new Date()) {
                         continue;
                     }
 
                     if (override.enabled) {
-                        features.push(override.feature_key);
+                        resolvedFeatures.add(override.feature_key);
                     } else {
-                        features = features.filter(f => f !== override.feature_key);
+                        resolvedFeatures.delete(override.feature_key);
                     }
                 }
             }
 
-            features = [...new Set(features)];
-
             return new Response(
-                JSON.stringify({ features }),
+                JSON.stringify({
+                    features: Array.from(resolvedFeatures),
+                    plan: subscription?.plan,
+                    status: subscription?.status
+                }),
                 { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             );
         }

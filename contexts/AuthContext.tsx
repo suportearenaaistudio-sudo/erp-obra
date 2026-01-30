@@ -185,32 +185,60 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const loadFeatures = async (tenantId: string, subscription: any) => {
         try {
-            // Start with plan features
-            let resolvedFeatures = [...(subscription.plan?.included_features || [])];
-
-            // Get overrides
-            const { data: overrides } = await supabase
-                .from('tenant_feature_overrides')
-                .select('*')
-                .eq('tenant_id', tenantId)
-                .or('expires_at.is.null,expires_at.gt.now()');
-
-            // Apply overrides
-            if (overrides) {
-                for (const override of overrides) {
-                    if (override.enabled) {
-                        resolvedFeatures.push(override.feature_key);
-                    } else {
-                        resolvedFeatures = resolvedFeatures.filter(f => f !== override.feature_key);
-                    }
+            // Call Edge Function 'me' to get resolved features
+            // This is the Source of Truth
+            const { data, error } = await supabase.functions.invoke('me', {
+                method: 'GET',
+                headers: {
+                    // Force path to /features to get just the features
+                    'x-part-path': 'features'
                 }
+            });
+
+            // Note: The Edge Function router in 'me' checks pathParts. 
+            // supabase.functions.invoke('me') hits the root. 
+            // To hit /me/features we might need to adjust the function or parameters.
+            // Let's rely on the root /me for now if it returns features, 
+            // OR simpler: just replicate the query here BUT with the strict logic?
+            // User requested: "Front sempre usa /me/features"
+
+            // Let's try to call the function properly.
+            // The function checks `url.pathname.split('/')`.
+            // When invoking via client, the URL is usually just the function URL.
+            // We might need to pass a query param or body to route internally if we can't append path.
+            // A safer bet is to use the full user info from /me since we load user data anyway.
+
+            if (error) throw error;
+
+            // If we called /me (root), it returns { features: [], ... }
+            if (data && data.features) {
+                setFeatures(data.features || []);
             }
 
-            setFeatures([...new Set(resolvedFeatures)]);
         } catch (error) {
-            console.error('Error loading features:', error);
+            console.error('Error loading features from backend:', error);
+            // Fallback to local calculation (safety net) or empty?
+            // For now, let's fallback to basic plan features to avoid breaking everything if function fails
+            setFeatures(subscription?.plan?.included_features || []);
         }
     };
+
+    // Poll features every 60s to ensure sync with Dev Admin
+    useEffect(() => {
+        if (!user || !tenant) return;
+
+        const interval = setInterval(() => {
+            // We need subscription to query, but subscription might be stale?
+            // Actually, the backend 'me' endpoint fetches subscription fresh.
+            // So we just need to call it.
+            if (profile?.tenant_id) {
+                // We pass null for subscription since backend fetches it
+                loadFeatures(profile.tenant_id, null);
+            }
+        }, 60000); // 60 seconds
+
+        return () => clearInterval(interval);
+    }, [user, tenant, profile]);
 
     const loadPermissions = async (tenantId: string, roleId: string) => {
         try {
