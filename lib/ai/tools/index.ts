@@ -17,6 +17,8 @@ import * as systemTools from './system';
 import * as inventoryTools from './inventory';
 import * as financeTools from './finance';
 import * as reportTools from './reports';
+import * as budgetTools from './budgets';
+import * as procurementTools from './procurement';
 
 /**
  * Tool Declarations (for Gemini function calling)
@@ -224,6 +226,120 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         },
     },
 
+    // ========== BUDGETS ==========
+    {
+        name: 'get_budget_summary',
+        description: 'Retorna resumo completo de um orçamento de obra (total, gasto, saldo, itens)',
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                budgetId: {
+                    type: SchemaType.STRING,
+                    description: 'ID (UUID) do orçamento',
+                },
+            },
+            required: ['budgetId'],
+        },
+    },
+    {
+        name: 'list_budgets',
+        description: 'Lista orçamentos com filtros (status, obra, cliente)',
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                status: {
+                    type: SchemaType.STRING,
+                    description: 'Status do orçamento',
+                    enum: ['draft', 'approved', 'rejected'],
+                    format: 'enum',
+                },
+                projectId: {
+                    type: SchemaType.STRING,
+                    description: 'Filtrar por ID da obra',
+                },
+                limit: {
+                    type: SchemaType.NUMBER,
+                    description: 'Limite de resultados (default: 20)',
+                },
+            },
+        },
+    },
+    {
+        name: 'get_budget_items',
+        description: 'Lista itens detalhados de um orçamento (materiais, serviços, quantidades, preços)',
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                budgetId: {
+                    type: SchemaType.STRING,
+                    description: 'ID (UUID) do orçamento',
+                },
+            },
+            required: ['budgetId'],
+        },
+    },
+
+    // ========== PROCUREMENT ==========
+    {
+        name: 'list_purchase_orders',
+        description: 'Lista pedidos de compra (POs) com filtros (status, fornecedor, data)',
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                status: {
+                    type: SchemaType.STRING,
+                    description: 'Status do pedido',
+                    enum: ['pending', 'approved', 'received', 'cancelled'],
+                    format: 'enum',
+                },
+                supplierId: {
+                    type: SchemaType.STRING,
+                    description: 'Filtrar por ID do fornecedor',
+                },
+                startDate: {
+                    type: SchemaType.STRING,
+                    description: 'Data inicial (YYYY-MM-DD)',
+                },
+                endDate: {
+                    type: SchemaType.STRING,
+                    description: 'Data final (YYYY-MM-DD)',
+                },
+                limit: {
+                    type: SchemaType.NUMBER,
+                    description: 'Limite de resultados (default: 20)',
+                },
+            },
+        },
+    },
+    {
+        name: 'get_purchase_order_details',
+        description: 'Retorna detalhes completos de um pedido de compra (fornecedor, itens, valores, status de recebimento)',
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                orderId: {
+                    type: SchemaType.STRING,
+                    description: 'ID (UUID) do pedido de compra',
+                },
+            },
+            required: ['orderId'],
+        },
+    },
+    {
+        name: 'get_supplier_summary',
+        description: 'Resumo de compras de um fornecedor (total gasto, número de pedidos, histórico)',
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                supplierId: {
+                    type: SchemaType.STRING,
+                    description: 'ID (UUID) do fornecedor',
+                },
+            },
+            required: ['supplierId'],
+        },
+    },
+
     // ========== CRM ==========
     {
         name: 'get_client_summary',
@@ -373,6 +489,16 @@ export const TOOL_HANDLERS: ToolRegistry = {
     get_client_summary: crmTools.getClientSummary,
     search_clients: crmTools.searchClients,
     get_pipeline_status: crmTools.getPipelineStatus,
+
+    // Budgets
+    get_budget_summary: budgetTools.getBudgetSummary,
+    list_budgets: budgetTools.listBudgets,
+    get_budget_items: budgetTools.getBudgetItems,
+
+    // Procurement
+    list_purchase_orders: procurementTools.listPurchaseOrders,
+    get_purchase_order_details: procurementTools.getPurchaseOrderDetails,
+    get_supplier_summary: procurementTools.getSupplierSummary,
 
     // System
     get_user_context: systemTools.getUserContext,
