@@ -154,7 +154,10 @@ export const Layout = () => {
                   <SidebarItem to="/admin" icon={Shield} label="Admin da Empresa" onClick={() => { }} />
                 )}
                 {isDevAdmin() && (
-                  <SidebarItem to="/dev-admin" icon={Crown} label="Dev Admin" onClick={() => { }} />
+                  <>
+                    <SidebarItem to="/dev-admin" icon={Crown} label="Dev Admin" onClick={() => { }} />
+                    <SidebarItem to="/test-multitenant" icon={Settings} label="🧪 Testar Multi-Tenant" onClick={() => { }} />
+                  </>
                 )}
               </div>
             )}

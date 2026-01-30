@@ -22,6 +22,9 @@ import { Contractors } from './pages/Contractors';
 import { DevAdmin } from './pages/DevAdmin';
 import { TenantAdmin } from './pages/TenantAdmin';
 
+// Test page
+import TestMultiTenantPage from './pages/TestMultiTenantPage';
+
 function App() {
   return (
     <AuthProvider>
@@ -46,6 +49,9 @@ function App() {
               {/* Admin routes */}
               <Route path="dev-admin" element={<DevAdmin />} />
               <Route path="admin" element={<TenantAdmin />} />
+
+              {/* Test route */}
+              <Route path="test-multitenant" element={<TestMultiTenantPage />} />
 
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>

@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { DevAdminSupport } from './DevAdmin/DevAdminSupport';
 import { DevAdminStats } from './DevAdmin/DevAdminStats';
+import { TenantDetailsModal } from './DevAdmin/TenantDetailsModal';
 import {
     Building2,
     Users,
@@ -19,6 +20,7 @@ import {
     AlertTriangle,
     MessageCircle,
     BarChart3,
+    Eye,
 } from 'lucide-react';
 
 interface TenantWithSubscription {
@@ -47,6 +49,7 @@ export const DevAdmin = () => {
     const [features, setFeatures] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
 
     useEffect(() => {
         loadData();
@@ -68,7 +71,9 @@ export const DevAdmin = () => {
     };
 
     const loadTenants = async () => {
-        const { data: tenantsData } = await supabase
+        console.log('🔍 Carregando tenants...');
+
+        const { data: tenantsData, error } = await supabase
             .from('tenants')
             .select(`
         *,
@@ -79,6 +84,22 @@ export const DevAdmin = () => {
         )
       `)
             .order('created_at', { ascending: false });
+
+        console.log('📊 Resultado da query:', { tenantsData, error });
+
+        if (error) {
+            console.error('❌ Erro ao carregar tenants:', error);
+            alert('Erro ao carregar tenants: ' + error.message);
+            return;
+        }
+
+        if (!tenantsData || tenantsData.length === 0) {
+            console.warn('⚠️ Nenhum tenant encontrado!');
+            setTenants([]);
+            return;
+        }
+
+        console.log(`✅ ${tenantsData.length} tenants encontrados`);
 
         // Load counts separately
         const tenantsWithCounts = await Promise.all(
@@ -102,6 +123,7 @@ export const DevAdmin = () => {
             })
         );
 
+        console.log('✅ Tenants com contagens:', tenantsWithCounts);
         setTenants(tenantsWithCounts);
     };
 
@@ -293,6 +315,9 @@ export const DevAdmin = () => {
                                         <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>
                                             CRIADO EM
                                         </th>
+                                        <th style={{ padding: '12px 16px', textAlign: 'center', fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>
+                                            AÇÕES
+                                        </th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -350,6 +375,27 @@ export const DevAdmin = () => {
                                                 <span style={{ fontSize: '13px', color: '#6b7280' }}>
                                                     {new Date(tenant.created_at).toLocaleDateString('pt-BR')}
                                                 </span>
+                                            </td>
+                                            <td style={{ padding: '16px', textAlign: 'center' }}>
+                                                <button
+                                                    onClick={() => setSelectedTenantId(tenant.id)}
+                                                    style={{
+                                                        padding: '8px 16px',
+                                                        background: '#667eea',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        borderRadius: '6px',
+                                                        fontSize: '13px',
+                                                        fontWeight: '500',
+                                                        cursor: 'pointer',
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '6px',
+                                                    }}
+                                                >
+                                                    <Eye size={16} />
+                                                    Ver Detalhes
+                                                </button>
                                             </td>
                                         </tr>
                                     ))}
@@ -502,6 +548,15 @@ export const DevAdmin = () => {
 
             {activeTab === 'support' && (
                 <DevAdminSupport />
+            )}
+
+            {/* Modal de Detalhes do Tenant */}
+            {selectedTenantId && (
+                <TenantDetailsModal
+                    tenantId={selectedTenantId}
+                    onClose={() => setSelectedTenantId(null)}
+                    onUpdate={() => loadData()}
+                />
             )}
         </div>
     );
